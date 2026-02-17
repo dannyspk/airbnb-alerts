@@ -1,0 +1,104 @@
+import cron from 'node-cron';
+import { query } from '../db/index.js';
+import { addSearchJob, addListingJob } from '../workers/queue.js';
+import logger from '../utils/logger.js';
+
+/**
+ * Schedule periodic scraping jobs based on subscription tiers
+ */
+export function startScheduler() {
+  // Check basic tier alerts (once per day at 9 AM)
+  cron.schedule('0 9 * * *', async () => {
+    logger.info('Running daily basic tier scraping...');
+    
+    try {
+      const result = await query(
+        `SELECT sa.id, sa.alert_type, u.subscription_tier 
+         FROM search_alerts sa
+         JOIN users u ON u.id = sa.user_id
+         WHERE sa.is_active = true 
+         AND u.subscription_tier = 'basic'
+         AND u.subscription_status = 'active'`
+      );
+
+      for (const alert of result.rows) {
+        if (alert.alert_type === 'search') {
+          await addSearchJob(alert.id, 'normal');
+        } else if (alert.alert_type === 'listing') {
+          await addListingJob(alert.id, 'normal');
+        }
+      }
+
+      logger.info(`Queued ${result.rows.length} basic tier alerts`);
+    } catch (error) {
+      logger.error('Basic tier scheduling error:', error);
+    }
+  });
+
+  // Check premium tier alerts (every 15 minutes)
+  cron.schedule('*/15 * * * *', async () => {
+    logger.info('Running premium tier scraping...');
+    
+    try {
+      const result = await query(
+        `SELECT sa.id, sa.alert_type, u.subscription_tier 
+         FROM search_alerts sa
+         JOIN users u ON u.id = sa.user_id
+         WHERE sa.is_active = true 
+         AND u.subscription_tier = 'premium'
+         AND u.subscription_status = 'active'`
+      );
+
+      for (const alert of result.rows) {
+        if (alert.alert_type === 'search') {
+          await addSearchJob(alert.id, 'high');
+        } else if (alert.alert_type === 'listing') {
+          await addListingJob(alert.id, 'high');
+        }
+      }
+
+      logger.info(`Queued ${result.rows.length} premium tier alerts`);
+    } catch (error) {
+      logger.error('Premium tier scheduling error:', error);
+    }
+  });
+
+  // Clean up old notifications (daily at 3 AM)
+  cron.schedule('0 3 * * *', async () => {
+    logger.info('Cleaning up old notifications...');
+    
+    try {
+      const result = await query(
+        `DELETE FROM notifications 
+         WHERE sent_at < NOW() - INTERVAL '30 days'`
+      );
+      
+      logger.info(`Cleaned up ${result.rowCount} old notifications`);
+    } catch (error) {
+      logger.error('Cleanup error:', error);
+    }
+  });
+
+  // Clean up old search results (weekly on Sunday at 2 AM)
+  cron.schedule('0 2 * * 0', async () => {
+    logger.info('Cleaning up old search results...');
+    
+    try {
+      const result = await query(
+        `DELETE FROM search_results 
+         WHERE detected_at < NOW() - INTERVAL '60 days'`
+      );
+      
+      logger.info(`Cleaned up ${result.rowCount} old search results`);
+    } catch (error) {
+      logger.error('Search results cleanup error:', error);
+    }
+  });
+
+  logger.info('✅ Scheduler started');
+  logger.info('📅 Basic tier: Daily at 9 AM');
+  logger.info('📅 Premium tier: Every 15 minutes');
+  logger.info('🧹 Cleanup: Daily at 3 AM, weekly on Sunday at 2 AM');
+}
+
+export default { startScheduler };

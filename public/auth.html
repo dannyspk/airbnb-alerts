@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Sign in — Airbnb Alerts</title>
+    <link rel="stylesheet" href="/styles.css">
+  </head>
+  <body class="auth-page">
+    <div class="container">
+      <header>
+        <h1>Airbnb Alerts — Sign in</h1>
+      </header>
+
+      <main>
+        <section class="card" id="auth-card">
+          <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px">
+            <div style="width:48px;height:48px;border-radius:10px;background:linear-gradient(135deg,#FF5A5F,#FF8A80);display:flex;align-items:center;justify-content:center;font-weight:700;color:white">AA</div>
+            <div>
+              <h2 style="margin:0 0 4px 0">Welcome back</h2>
+              <div class="note">Sign in to your Airbnb Alerts dashboard</div>
+            </div>
+          </div>
+
+          <div style="margin-top:8px">
+            <label style="display:block;margin-bottom:6px;font-size:13px;color:var(--muted)">Email</label>
+            <input id="email" placeholder="you@example.com" autocomplete="username" />
+            <div id="email-help" class="note" style="margin-top:6px"></div>
+          </div>
+
+          <div style="margin-top:12px">
+            <label style="display:block;margin-bottom:6px;font-size:13px;color:var(--muted)">Password</label>
+            <div style="display:flex;gap:8px;align-items:center">
+              <input id="password" placeholder="Choose a strong password" type="password" autocomplete="current-password" style="flex:1" />
+              <button id="toggle-password" class="secondary" type="button">Show</button>
+            </div>
+            <div id="password-help" class="note" style="margin-top:6px">At least 8 characters, include letters and numbers.</div>
+          </div>
+
+          <div class="row buttons" style="margin-top:16px">
+            <button id="btn-register" class="primary" disabled>Register</button>
+            <button id="btn-login" disabled>Login</button>
+          </div>
+
+          <p class="note" style="margin-top:12px">By registering you agree to receive email notifications for alerts.</p>
+        </section>
+      </main>
+
+      <footer>
+        <small>Airbnb Alerts — Demo</small>
+      </footer>
+    </div>
+
+    <div id="message" class="message hidden"></div>
+    <script src="/auth.js"></script>
+  </body>
+</html>

@@ -1,0 +1,145 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Airbnb Alerts — Demo UI</title>
+    <link rel="stylesheet" href="/styles.css">
+  </head>
+  <body>
+    <div class="container">
+      <header>
+        <h1>Airbnb Alerts — Demo</h1>
+        <div id="auth-area">
+          <button id="btn-logout" class="hidden">Logout</button>
+        </div>
+      </header>
+
+      <main>
+        <!-- Authentication moved to /auth.html -->
+
+        <section class="card hidden" id="create-alert-card">
+          <h2>Create alerts</h2>
+
+          <div style="display:flex;gap:12px;align-items:flex-start;flex-wrap:wrap">
+            <div style="flex:1;min-width:280px">
+              <h3>Track specific listing</h3>
+              <div class="row">
+                <input id="listing-id" placeholder="Listing ID (e.g. 12345678)" />
+                <input id="listing-url" placeholder="Listing URL" />
+              </div>
+              <div class="row">
+                <label>Check-in <input id="check-in" type="date" /></label>
+                <label>Check-out <input id="check-out" type="date" /></label>
+              </div>
+              <div class="row buttons">
+                <button id="btn-save-listing">Save listing</button>
+              </div>
+            </div>
+
+            <div style="flex:1;min-width:320px">
+              <h3>Search-based alert</h3>
+              <div class="row">
+                <div style="position:relative;flex:1">
+                  <input id="search-location" placeholder="Location (city, address)" autocomplete="off" />
+                  <div id="location-suggestions" class="hidden" style="position:absolute;left:0;right:0;z-index:20;background:var(--card);border:1px solid rgba(16,24,40,0.06);margin-top:6px;border-radius:8px;overflow:hidden;box-shadow:0 6px 18px rgba(16,24,40,0.06)"></div>
+                </div>
+              </div>
+              <div class="note" style="margin-top:6px">Dates are optional for preview — include them if you want availability-specific results.</div>
+              <div class="row" style="align-items:center;gap:8px;margin-top:8px">
+                <label><input type="checkbox" id="filter-premium"/> Premium</label>
+                <input id="filter-premium-min" placeholder="$ min" type="number" style="width:100px" />
+                <label><input type="checkbox" id="filter-popular"/> Popular</label>
+                <input id="filter-popular-min" placeholder="min reviews" type="number" style="width:110px" />
+                <label><input type="checkbox" id="filter-superhost"/> Superhost</label>
+                <label style="margin-left:8px"><input type="checkbox" id="filter-saved"/> Only saved</label>
+              </div>
+              <div class="row">
+                <label>Check-in <input id="search-check-in" type="date" /></label>
+                <label>Check-out <input id="search-check-out" type="date" /></label>
+              </div>
+              <div class="row">
+                <input id="price-min" placeholder="Min price" type="number" />
+                <input id="price-max" placeholder="Max price" type="number" />
+                <input id="guests" placeholder="Guests" type="number" />
+              </div>
+              <div class="row buttons">
+                <button id="btn-create-search">Create search alert</button>
+                <button id="btn-preview-search" class="secondary">Preview results</button>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section class="card hidden" id="alerts-card">
+          <h2>Your Alerts</h2>
+          <div id="alerts-list">(no alerts)</div>
+        </section>
+
+        <section class="card hidden" id="listings-panel">
+          <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">
+            <h2 style="margin:0">Listings <span id="listings-for-id"></span></h2>
+            <div style="display:flex;gap:8px;align-items:center">
+              <label style="font-size:13px;color:var(--muted)">Page size
+                <select id="page-size" style="margin-left:6px">
+                  <option>10</option>
+                  <option selected>20</option>
+                  <option>50</option>
+                </select>
+              </label>
+              <button id="btn-prev-page" class="secondary">Prev</button>
+              <button id="btn-next-page" class="secondary">Next</button>
+              <button id="btn-load-more">Load more</button>
+            </div>
+          </div>
+          <div id="listings-list">(no listings)</div>
+          <pre id="preview-debug" class="note hidden" style="margin-top:12px;white-space:pre-wrap;max-height:180px;overflow:auto;background:var(--muted-bg);padding:8px;border-radius:8px;border:1px solid rgba(16,24,40,0.04)"></pre>
+        </section>
+
+        <!-- Confirmation modal (re-used for save actions) -->
+        <div id="confirm-modal" class="modal hidden" role="dialog" aria-modal="true">
+          <div class="modal-backdrop" id="confirm-backdrop"></div>
+          <div class="modal-content" style="max-width:420px">
+            <div id="confirm-body" style="padding:12px">Are you sure?</div>
+            <div style="display:flex;gap:8px;justify-content:flex-end;padding:12px;background:transparent">
+              <button id="confirm-cancel" class="secondary">Cancel</button>
+              <button id="confirm-ok">Confirm</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Listing details modal -->
+        <div id="listing-modal" class="modal hidden" role="dialog" aria-modal="true">
+          <div class="modal-backdrop" id="modal-backdrop"></div>
+          <div class="modal-content">
+            <button id="modal-close" class="modal-close">×</button>
+            <div id="modal-body">
+              <div id="modal-loader">Loading...</div>
+            </div>
+          </div>
+        </div>
+
+        <section class="card" id="notifications-card">
+          <h2>Recent notifications</h2>
+          <div id="notifications-list">(no notifications)</div>
+        </section>
+
+        <section class="card" id="help-card">
+          <h2>Quick actions</h2>
+          <div class="row">
+            <button id="btn-refresh">Refresh alerts</button>
+          </div>
+          <p class="note">This is a minimal demo UI — uses the backend API at <code>/api</code>.</p>
+        </section>
+
+        <div id="message" class="message hidden"></div>
+      </main>
+
+      <footer>
+        <small>Airbnb Alerts — Backend demo</small>
+      </footer>
+    </div>
+
+    <script src="/app.js"></script>
+  </body>
+</html>
