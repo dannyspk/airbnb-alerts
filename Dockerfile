@@ -1,12 +1,13 @@
 # Use official Node.js image (Debian variant) and ensure Python is available for pyairbnb
-FROM node:20-bullseye
+# Use Debian Bookworm variant so `apt-get install python3` provides Python >= 3.10
+FROM node:20-bookworm-slim
 
 # Create app directory
 WORKDIR /app
 
 # Install OS deps (python + pip) required by Python scraper
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends python3 python3-pip && \
+    apt-get install -y --no-install-recommends python3 python3-pip ca-certificates && \
     rm -rf /var/lib/apt/lists/*
 
 # Copy package files first for dependency install
