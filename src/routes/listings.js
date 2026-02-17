@@ -121,7 +121,9 @@ router.post('/search', authenticateToken, async (req, res) => {
       }
     }
 
-    const results = await searchAirbnb(params);
+  // sanitize params for the Python scraper (remove explicit nulls)
+  const pyParams = Object.fromEntries(Object.entries(params).filter(([k, v]) => v !== null && typeof v !== 'undefined'));
+  const results = await searchAirbnb(pyParams);
     let normalized = Array.isArray(results) ? results : (results.results || results.listings || []);
 
     // annotate saved status for current user (if any listings returned)
@@ -153,8 +155,13 @@ router.post('/search', authenticateToken, async (req, res) => {
       return Number(r) || 0;
     };
     const getPriceAmount = (p) => {
-      if (!p) return null;
+      if (p === null || typeof p === 'undefined') return null;
       if (typeof p === 'number') return p;
+      // handle string prices like "$75" or "75.00"
+      if (typeof p === 'string') {
+        const n = parseFloat(p.replace(/[^0-9.\-]/g, ''));
+        return Number.isFinite(n) ? n : null;
+      }
       // common shapes: { unit: { amount } } or { amount } or { total: { amount } }
       if (p.unit && p.unit.amount) return Number(p.unit.amount);
       if (p.amount) return Number(p.amount);
@@ -162,7 +169,15 @@ router.post('/search', authenticateToken, async (req, res) => {
       return null;
     };
 
-    // compute boolean flags for each listing
+    // Debugging: when DEBUG=1, print incoming params and a small sample so
+    // it's easy to see why filters did/didn't match during preview.
+    if (process.env.DEBUG === '1') {
+      try {
+        console.debug('Search request params:', params);
+      } catch (e) { /* ignore */ }
+    }
+
+  // compute boolean flags for each listing
     normalized = normalized.map((r) => {
       const rating = getRatingValue(r.rating);
       const reviews = getReviewsCount(r.reviewsCount || r.rating);
@@ -175,6 +190,24 @@ router.post('/search', authenticateToken, async (req, res) => {
         isSuperhost: !!(r.hostIsSuperhost),
       });
     });
+
+    // Apply explicit price range filters (defensive: also enforce on server-side
+    // in case the Python scraper didn't apply them).
+    const explicitMin = (typeof params.price_min !== 'undefined' && params.price_min !== null) ? parseFloat(params.price_min) : null;
+    const explicitMax = (typeof params.price_max !== 'undefined' && params.price_max !== null) ? parseFloat(params.price_max) : null;
+    if (explicitMin !== null) {
+      normalized = normalized.filter(r => (r._priceAmount !== null) && (r._priceAmount >= explicitMin));
+    }
+    if (explicitMax !== null) {
+      normalized = normalized.filter(r => (r._priceAmount !== null) && (r._priceAmount <= explicitMax));
+    }
+
+    if (process.env.DEBUG === '1') {
+      try {
+        const sample = normalized.slice(0, 6).map(x => ({ id: x.id, _priceAmount: getPriceAmount(x.price), _reviewsCount: getReviewsCount(x.reviewsCount || x.rating) }));
+        console.debug('Normalized results sample (first 6):', sample);
+      } catch (e) { /* ignore */ }
+    }
 
     // apply filters (premium, popular, superhost, saved)
     const applyFilters = [];

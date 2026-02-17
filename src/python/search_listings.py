@@ -81,7 +81,7 @@ def search_listings(params):
                 'price': price,
                 'currency': currency,
                 'rating': pick('rating', 'stars', 'score'),
-                'reviewsCount': pick('reviewsCount', 'review_count', 'numberOfGuests') or 0,
+                'reviewsCount': pick('reviewsCount', 'review_count', 'reviews') or 0,
                 'roomType': pick('roomType', 'type'),
                 'guests': pick('guests', 'person_capacity'),
                 'address': pick('address', 'location_address'),
