@@ -3,22 +3,42 @@ import { writeFileSync, readFileSync, unlinkSync } from 'fs';
 import { join } from 'path';
 import crypto from 'crypto';
 
+// Resolve a usable python command (check process.env.PYTHON_PATH, then python3, then python)
+function resolvePythonCmd() {
+  const candidates = [];
+  if (process.env.PYTHON_PATH) candidates.push(process.env.PYTHON_PATH);
+  candidates.push('python3', 'python');
+
+  for (const cmd of candidates) {
+    try {
+      const proc = spawnSync(cmd, ['--version']);
+      if (proc && (proc.status === 0 || proc.status === null)) {
+        return cmd;
+      }
+    } catch (e) {
+      // try next
+    }
+  }
+  return null;
+}
+
 // Verify Python interpreter meets minimum version required by pyairbnb
 function checkPythonVersion() {
-  const pythonCmd = process.env.PYTHON_PATH || 'python3';
+  const pythonCmd = resolvePythonCmd();
+  if (!pythonCmd) return { ok: false, message: 'No Python interpreter found (tried python3, python). Set PYTHON_PATH if Python is installed.' };
   try {
-  const proc = spawnSync(pythonCmd, ['--version']);
+    const proc = spawnSync(pythonCmd, ['--version']);
     const out = (proc.stdout || proc.stderr || '').toString().trim();
-    const m = out.match(/Python\s+(\d+)\.(\d+)\.(\d+)/);
-    if (!m) return { ok: true };
+    const m = out.match(/Python\s+(\d+)\.(\d+)(?:\.(\d+))?/);
+    if (!m) return { ok: false, message: `Could not parse version from: ${out}` };
     const major = parseInt(m[1], 10);
     const minor = parseInt(m[2], 10);
     if (major < 3 || (major === 3 && minor < 10)) {
       return { ok: false, message: `Python ${major}.${minor} found — pyairbnb requires Python >= 3.10` };
     }
-    return { ok: true };
+    return { ok: true, cmd: pythonCmd };
   } catch (err) {
-    return { ok: false, message: `Could not determine python version using ${process.env.PYTHON_PATH || 'python3'}: ${err.message}` };
+    return { ok: false, message: `Could not determine python version using ${pythonCmd}: ${err.message}` };
   }
 }
 
@@ -34,6 +54,7 @@ export async function executePythonScript(scriptPath, data) {
     if (!vcheck.ok) {
       return reject(new Error(`Python version check failed: ${vcheck.message}`));
     }
+    const pythonCmd = vcheck.cmd || process.env.PYTHON_PATH || 'python3';
     // Create temp file for input data
     const tempId = crypto.randomBytes(8).toString('hex');
     const inputFile = join(process.env.TEMP_DIR || '/tmp', `input_${tempId}.json`);
@@ -44,7 +65,7 @@ export async function executePythonScript(scriptPath, data) {
       writeFileSync(inputFile, JSON.stringify(data));
 
       // Spawn Python process
-      const pythonProcess = spawn(process.env.PYTHON_PATH || 'python3', [
+      const pythonProcess = spawn(pythonCmd, [
         scriptPath,
         inputFile,
         outputFile
