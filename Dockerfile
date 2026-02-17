@@ -7,7 +7,7 @@ WORKDIR /app
 
 # Install OS deps (python + pip) required by Python scraper
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends python3 python3-pip ca-certificates && \
+    apt-get install -y --no-install-recommends python3 python3-pip python3-venv ca-certificates && \
     rm -rf /var/lib/apt/lists/*
 
 # Copy package files first for dependency install
@@ -18,7 +18,11 @@ RUN npm ci --only=production || npm install --only=production
 
 # Copy Python requirements and install
 COPY requirements.txt ./
-RUN if [ -f requirements.txt ]; then pip3 install --no-cache-dir -r requirements.txt; fi
+# Create a lightweight virtualenv and install Python deps there to avoid
+# "externally-managed-environment" restrictions in Debian system Python.
+RUN python3 -m venv /opt/venv \
+ && /opt/venv/bin/pip install --upgrade pip setuptools wheel \
+ && if [ -f requirements.txt ]; then /opt/venv/bin/pip install --no-cache-dir -r requirements.txt; fi
 
 # Copy app source
 COPY . ./
@@ -27,7 +31,8 @@ COPY . ./
 RUN mkdir -p /tmp
 
 ENV NODE_ENV=production
-ENV PYTHON_PATH=python3
+ENV PYTHON_PATH=/opt/venv/bin/python
+ENV PATH="/opt/venv/bin:$PATH"
 ENV TEMP_DIR=/tmp
 
 # Default command (Railway/Procfile can override per service)
