@@ -129,4 +129,47 @@ export async function sendWelcomeEmail(userEmail) {
   }
 }
 
-export default { sendNewListingEmail, sendWelcomeEmail };
+/**
+ * Send password reset email
+ */
+export async function sendPasswordResetEmail(userEmail, resetUrl) {
+  const mailOptions = {
+    from: process.env.EMAIL_FROM,
+    to: userEmail,
+    subject: 'Reset your Airbnb Alerts password',
+    html: `
+      <!DOCTYPE html>
+      <html>
+      <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
+        <div style="max-width: 600px; margin: 0 auto; padding: 20px;">
+          <h1 style="color: #FF5A5F;">Reset your password</h1>
+          <p>We received a request to reset your password. Click the button below to choose a new one.</p>
+          <p>This link expires in <strong>1 hour</strong>.</p>
+          <a href="${resetUrl}"
+             style="display: inline-block; padding: 12px 24px; background: #FF5A5F;
+                    color: white; text-decoration: none; border-radius: 4px; margin: 16px 0;">
+            Reset Password
+          </a>
+          <p style="color: #666; font-size: 13px;">
+            If you didn't request this, you can safely ignore this email — your password won't change.
+          </p>
+          <p style="color: #666; font-size: 12px; margin-top: 24px;">
+            Or copy this link: ${resetUrl}
+          </p>
+        </div>
+      </body>
+      </html>
+    `
+  };
+
+  try {
+    const info = await transporter.sendMail(mailOptions);
+    console.log('✅ Password reset email sent:', info.messageId);
+    return { success: true };
+  } catch (error) {
+    console.error('❌ Password reset email error:', error);
+    throw error;
+  }
+}
+
+export default { sendNewListingEmail, sendWelcomeEmail, sendPasswordResetEmail };

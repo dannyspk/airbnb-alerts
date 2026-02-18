@@ -5,53 +5,212 @@
     <meta name="viewport" content="width=device-width,initial-scale=1" />
     <title>Sign in — Airbnb Alerts</title>
     <link rel="stylesheet" href="/styles.css">
+    <style>
+      /* ── Auth-page overrides ─────────────────────────────────────── */
+      body { display:flex; align-items:center; justify-content:center; min-height:100vh; background:var(--bg,#0f1113); margin:0; }
+      .auth-shell { width:100%; max-width:400px; padding:24px 16px; }
+
+      .auth-card {
+        background: var(--card, #1a1d21);
+        border: 1px solid rgba(255,255,255,0.06);
+        border-radius: 16px;
+        padding: 32px 28px;
+      }
+
+      .auth-logo {
+        width:48px; height:48px; border-radius:12px;
+        background: linear-gradient(135deg,#FF5A5F,#FF8A80);
+        display:flex; align-items:center; justify-content:center;
+        font-weight:700; color:#fff; font-size:18px; margin-bottom:20px;
+      }
+
+      .auth-title   { font-size:22px; font-weight:700; margin:0 0 4px; }
+      .auth-sub     { font-size:13px; color:var(--muted,rgba(255,255,255,0.5)); margin:0 0 24px; }
+
+      /* Google button */
+      .btn-google {
+        display:flex; align-items:center; justify-content:center; gap:10px;
+        width:100%; padding:11px 16px;
+        background:#fff; color:#1f1f1f; border:1px solid #ddd;
+        border-radius:8px; font-size:14px; font-weight:500;
+        cursor:pointer; text-decoration:none; transition:box-shadow .15s;
+      }
+      .btn-google:hover { box-shadow:0 2px 8px rgba(0,0,0,0.15); }
+      .btn-google svg   { flex-shrink:0; }
+
+      /* Divider */
+      .divider {
+        display:flex; align-items:center; gap:12px;
+        margin:20px 0; color:var(--muted,rgba(255,255,255,0.35)); font-size:12px;
+      }
+      .divider::before, .divider::after {
+        content:''; flex:1; height:1px; background:rgba(255,255,255,0.08);
+      }
+
+      /* Field */
+      .field       { margin-bottom:16px; }
+      .field label { display:block; font-size:13px; color:var(--muted,rgba(255,255,255,0.55)); margin-bottom:6px; }
+      .field input { width:100%; box-sizing:border-box; }
+      .field-hint  { font-size:12px; margin-top:5px; min-height:16px; }
+      .hint-ok     { color:#34d399; }
+      .hint-err    { color:#f87171; }
+
+      /* Password toggle wrapper */
+      .pw-wrap { display:flex; gap:8px; }
+      .pw-wrap input { flex:1; min-width:0; }
+      .pw-wrap button { flex-shrink:0; white-space:nowrap; }
+
+      /* Submit button */
+      .btn-primary {
+        width:100%; padding:12px; font-size:15px; font-weight:600;
+        border-radius:8px; cursor:pointer; margin-top:8px;
+        background:#FF5A5F; color:#fff; border:none; transition:opacity .15s;
+      }
+      .btn-primary:hover:not(:disabled) { opacity:.88; }
+      .btn-primary:disabled { opacity:.45; cursor:default; }
+
+      /* Mode switchers */
+      .auth-footer { text-align:center; margin-top:20px; font-size:13px; color:var(--muted,rgba(255,255,255,0.5)); }
+      .auth-footer a, .auth-link { color:#FF5A5F; text-decoration:none; cursor:pointer; font-weight:500; }
+      .auth-footer a:hover, .auth-link:hover { text-decoration:underline; }
+
+      /* View toggling */
+      .view { display:none; }
+      .view.active { display:block; }
+
+      /* Toast */
+      .toast {
+        position:fixed; bottom:24px; left:50%; transform:translateX(-50%);
+        background:#1e2227; border:1px solid rgba(255,255,255,0.1);
+        color:#fff; border-radius:10px; padding:12px 20px;
+        font-size:14px; z-index:9999; max-width:360px; text-align:center;
+        opacity:0; transition:opacity .2s; pointer-events:none;
+      }
+      .toast.show  { opacity:1; }
+      .toast.error { border-color:#f87171; color:#fca5a5; }
+    </style>
   </head>
-  <body class="auth-page">
-    <div class="container">
-      <header>
-        <h1>Airbnb Alerts — Sign in</h1>
-      </header>
+  <body>
+    <div class="auth-shell">
+      <div class="auth-card">
+        <div class="auth-logo">AA</div>
 
-      <main>
-        <section class="card" id="auth-card">
-          <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px">
-            <div style="width:48px;height:48px;border-radius:10px;background:linear-gradient(135deg,#FF5A5F,#FF8A80);display:flex;align-items:center;justify-content:center;font-weight:700;color:white">AA</div>
-            <div>
-              <h2 style="margin:0 0 4px 0">Welcome back</h2>
-              <div class="note">Sign in to your Airbnb Alerts dashboard</div>
+        <!-- ── Login ─────────────────────────────────────────────── -->
+        <div class="view active" id="view-login">
+          <h1 class="auth-title">Welcome back</h1>
+          <p class="auth-sub">Sign in to your Airbnb Alerts account</p>
+
+          <a id="btn-google-login" class="btn-google" href="/api/auth/google">
+            <svg width="18" height="18" viewBox="0 0 48 48">
+              <path fill="#EA4335" d="M24 9.5c3.5 0 6.6 1.2 9.1 3.2l6.8-6.8C35.8 2.4 30.2 0 24 0 14.7 0 6.8 5.4 2.9 13.3l7.9 6.1C12.7 13 17.9 9.5 24 9.5z"/>
+              <path fill="#4285F4" d="M46.5 24.5c0-1.6-.1-3.1-.4-4.5H24v8.5h12.7c-.6 3-2.3 5.5-4.8 7.2l7.5 5.8c4.4-4.1 7.1-10.1 7.1-17z"/>
+              <path fill="#FBBC05" d="M10.8 28.6A14.5 14.5 0 0 1 9.5 24c0-1.6.3-3.2.7-4.6l-7.9-6.1A23.9 23.9 0 0 0 0 24c0 3.8.9 7.4 2.5 10.6l8.3-6z"/>
+              <path fill="#34A853" d="M24 48c6.2 0 11.4-2 15.2-5.5l-7.5-5.8c-2.1 1.4-4.7 2.3-7.7 2.3-6.1 0-11.3-3.5-13.2-9.4l-8.3 6C6.8 42.6 14.7 48 24 48z"/>
+            </svg>
+            Continue with Google
+          </a>
+
+          <div class="divider">or</div>
+
+          <div class="field">
+            <label for="login-email">Email</label>
+            <input id="login-email" type="email" placeholder="you@example.com" autocomplete="username" />
+          </div>
+          <div class="field">
+            <label for="login-password">Password</label>
+            <div class="pw-wrap">
+              <input id="login-password" type="password" placeholder="Your password" autocomplete="current-password" />
+              <button class="secondary toggle-pw" type="button" data-target="login-password">Show</button>
             </div>
           </div>
 
-          <div style="margin-top:8px">
-            <label style="display:block;margin-bottom:6px;font-size:13px;color:var(--muted)">Email</label>
-            <input id="email" placeholder="you@example.com" autocomplete="username" />
-            <div id="email-help" class="note" style="margin-top:6px"></div>
+          <div style="text-align:right;margin-top:-8px;margin-bottom:12px">
+            <span class="auth-link" id="link-forgot">Forgot password?</span>
           </div>
 
-          <div style="margin-top:12px">
-            <label style="display:block;margin-bottom:6px;font-size:13px;color:var(--muted)">Password</label>
-            <div style="display:flex;gap:8px;align-items:center">
-              <input id="password" placeholder="Choose a strong password" type="password" autocomplete="current-password" style="flex:1" />
-              <button id="toggle-password" class="secondary" type="button">Show</button>
+          <button class="btn-primary" id="btn-login">Sign in</button>
+
+          <div class="auth-footer">
+            Don't have an account? <span class="auth-link" id="link-to-register">Create one</span>
+          </div>
+        </div>
+
+        <!-- ── Register ──────────────────────────────────────────── -->
+        <div class="view" id="view-register">
+          <h1 class="auth-title">Create account</h1>
+          <p class="auth-sub">Get notified when Airbnb listings match your criteria</p>
+
+          <a id="btn-google-register" class="btn-google" href="/api/auth/google">
+            <svg width="18" height="18" viewBox="0 0 48 48">
+              <path fill="#EA4335" d="M24 9.5c3.5 0 6.6 1.2 9.1 3.2l6.8-6.8C35.8 2.4 30.2 0 24 0 14.7 0 6.8 5.4 2.9 13.3l7.9 6.1C12.7 13 17.9 9.5 24 9.5z"/>
+              <path fill="#4285F4" d="M46.5 24.5c0-1.6-.1-3.1-.4-4.5H24v8.5h12.7c-.6 3-2.3 5.5-4.8 7.2l7.5 5.8c4.4-4.1 7.1-10.1 7.1-17z"/>
+              <path fill="#FBBC05" d="M10.8 28.6A14.5 14.5 0 0 1 9.5 24c0-1.6.3-3.2.7-4.6l-7.9-6.1A23.9 23.9 0 0 0 0 24c0 3.8.9 7.4 2.5 10.6l8.3-6z"/>
+              <path fill="#34A853" d="M24 48c6.2 0 11.4-2 15.2-5.5l-7.5-5.8c-2.1 1.4-4.7 2.3-7.7 2.3-6.1 0-11.3-3.5-13.2-9.4l-8.3 6C6.8 42.6 14.7 48 24 48z"/>
+            </svg>
+            Sign up with Google
+          </a>
+
+          <div class="divider">or</div>
+
+          <div class="field">
+            <label for="reg-email">Email</label>
+            <input id="reg-email" type="email" placeholder="you@example.com" autocomplete="username" />
+            <div class="field-hint" id="reg-email-hint"></div>
+          </div>
+          <div class="field">
+            <label for="reg-password">Password</label>
+            <div class="pw-wrap">
+              <input id="reg-password" type="password" placeholder="Min 8 chars, letter + number" autocomplete="new-password" />
+              <button class="secondary toggle-pw" type="button" data-target="reg-password">Show</button>
             </div>
-            <div id="password-help" class="note" style="margin-top:6px">At least 8 characters, include letters and numbers.</div>
+            <div class="field-hint" id="reg-password-hint"></div>
           </div>
 
-          <div class="row buttons" style="margin-top:16px">
-            <button id="btn-register" class="primary" disabled>Register</button>
-            <button id="btn-login" disabled>Login</button>
+          <button class="btn-primary" id="btn-register" disabled>Create account</button>
+
+          <div class="auth-footer">
+            Already have an account? <span class="auth-link" id="link-to-login">Sign in</span>
+          </div>
+        </div>
+
+        <!-- ── Forgot password ───────────────────────────────────── -->
+        <div class="view" id="view-forgot">
+          <h1 class="auth-title">Reset password</h1>
+          <p class="auth-sub">Enter your email and we'll send you a reset link.</p>
+
+          <div class="field">
+            <label for="forgot-email">Email</label>
+            <input id="forgot-email" type="email" placeholder="you@example.com" autocomplete="username" />
           </div>
 
-          <p class="note" style="margin-top:12px">By registering you agree to receive email notifications for alerts.</p>
-        </section>
-      </main>
+          <button class="btn-primary" id="btn-forgot">Send reset link</button>
 
-      <footer>
-        <small>Airbnb Alerts — Demo</small>
-      </footer>
-    </div>
+          <div class="auth-footer">
+            <span class="auth-link" id="link-back-login">← Back to sign in</span>
+          </div>
+        </div>
 
-    <div id="message" class="message hidden"></div>
+        <!-- ── Reset password (arrived via email link) ───────────── -->
+        <div class="view" id="view-reset">
+          <h1 class="auth-title">Choose new password</h1>
+          <p class="auth-sub">Enter a new password for your account.</p>
+
+          <div class="field">
+            <label for="reset-password">New password</label>
+            <div class="pw-wrap">
+              <input id="reset-password" type="password" placeholder="Min 8 chars, letter + number" autocomplete="new-password" />
+              <button class="secondary toggle-pw" type="button" data-target="reset-password">Show</button>
+            </div>
+            <div class="field-hint" id="reset-password-hint"></div>
+          </div>
+
+          <button class="btn-primary" id="btn-reset" disabled>Update password</button>
+        </div>
+
+      </div><!-- /.auth-card -->
+    </div><!-- /.auth-shell -->
+
+    <div class="toast" id="toast"></div>
     <script src="/auth.js"></script>
   </body>
 </html>

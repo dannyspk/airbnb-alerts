@@ -2,12 +2,27 @@
 CREATE TABLE IF NOT EXISTS users (
   id SERIAL PRIMARY KEY,
   email VARCHAR(255) UNIQUE NOT NULL,
-  password_hash VARCHAR(255) NOT NULL,
+  password_hash VARCHAR(255),                          -- NULL for Google-only accounts
+  google_id VARCHAR(255) UNIQUE,                       -- Google OAuth sub
+  display_name VARCHAR(255),
+  avatar_url TEXT,
+  email_verified BOOLEAN DEFAULT FALSE,
   subscription_tier VARCHAR(20) DEFAULT 'basic' CHECK (subscription_tier IN ('basic', 'premium')),
   subscription_status VARCHAR(20) DEFAULT 'active' CHECK (subscription_status IN ('active', 'cancelled', 'expired')),
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
+
+-- Password reset tokens
+CREATE TABLE IF NOT EXISTS password_reset_tokens (
+  token_hash VARCHAR(128) PRIMARY KEY,
+  user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+  expires_at TIMESTAMP NOT NULL,
+  used_at TIMESTAMP,                                   -- NULL = not yet used
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_password_reset_user ON password_reset_tokens(user_id);
 
 -- Search alerts table
 CREATE TABLE IF NOT EXISTS search_alerts (
@@ -109,6 +124,42 @@ CREATE INDEX IF NOT EXISTS idx_listings_location ON listings(lat, lng);
 CREATE INDEX IF NOT EXISTS idx_search_results_search_id ON search_results(search_alert_id);
 CREATE INDEX IF NOT EXISTS idx_search_results_listing_id ON search_results(listing_id);
 CREATE INDEX IF NOT EXISTS idx_notifications_user_id ON notifications(user_id);
+
+-- Google OAuth + email verification columns (safe on existing DBs)
+ALTER TABLE users ADD COLUMN IF NOT EXISTS google_id VARCHAR(255) UNIQUE;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS display_name VARCHAR(255);
+ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar_url TEXT;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS email_verified BOOLEAN DEFAULT FALSE;
+ALTER TABLE users ALTER COLUMN password_hash DROP NOT NULL;
+
+-- URL-based alert support
+ALTER TABLE search_alerts ADD COLUMN IF NOT EXISTS search_url TEXT;
+ALTER TABLE search_alerts ADD COLUMN IF NOT EXISTS url_params JSONB;
+
+-- Prevent duplicate seen-listing rows per alert
+CREATE UNIQUE INDEX IF NOT EXISTS idx_search_results_alert_listing
+  ON search_results (search_alert_id, listing_id);
+
+-- Stripe billing
+ALTER TABLE users ADD COLUMN IF NOT EXISTS stripe_customer_id VARCHAR(255) UNIQUE;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS trial_ends_at TIMESTAMP;
+
+CREATE TABLE IF NOT EXISTS subscriptions (
+  id SERIAL PRIMARY KEY,
+  user_id INTEGER REFERENCES users(id) ON DELETE CASCADE UNIQUE,
+  stripe_subscription_id VARCHAR(255) UNIQUE,
+  stripe_price_id VARCHAR(255),
+  plan VARCHAR(20) NOT NULL DEFAULT 'free' CHECK (plan IN ('free', 'basic', 'premium')),
+  interval VARCHAR(10) CHECK (interval IN ('month', 'year')),
+  status VARCHAR(30) NOT NULL DEFAULT 'active',  -- active | past_due | canceled | trialing
+  current_period_end TIMESTAMP,
+  cancel_at_period_end BOOLEAN DEFAULT FALSE,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_subscriptions_user ON subscriptions(user_id);
+CREATE INDEX IF NOT EXISTS idx_subscriptions_stripe_id ON subscriptions(stripe_subscription_id);
 
 -- Refresh tokens (for JWT refresh flow)
 CREATE TABLE IF NOT EXISTS refresh_tokens (

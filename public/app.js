@@ -166,6 +166,31 @@ function handleLogout() {
   window.location.href = '/auth.html';
 }
 
+async function createUrlAlert() {
+  const btn = $('#btn-create-url-alert');
+  setBtnLoading(btn, true, 'Saving...');
+  try {
+    const search_url = $('#alert-search-url').value.trim();
+    if (!search_url) return showMessage('Please paste an Airbnb search URL', true);
+    if (!search_url.includes('airbnb.com')) return showMessage('URL must be from airbnb.com', true);
+    const res = await apiRequest('POST', '/api/alerts/url', { search_url });
+    showMessage(res.message || 'Alert saved!');
+    $('#alert-search-url').value = '';
+    loadAlerts();
+  } catch (err) {
+    if (err.upgrade_required) {
+      showMessage(err.error, true);
+      // Scroll to subscription card and pop open the upgrade picker
+      document.getElementById('subscription-card')?.scrollIntoView({ behavior: 'smooth' });
+      setTimeout(() => handleUpgradeClick(), 400);
+    } else {
+      showMessage(err.error || JSON.stringify(err), true);
+    }
+  } finally {
+    setBtnLoading(btn, false);
+  }
+}
+
 async function createListingAlert() {
   const btn = $('#btn-save-listing');
   setBtnLoading(btn, true, 'Saving...');
@@ -200,7 +225,7 @@ function renderAlerts(alerts) {
           <strong>${a.alert_type.toUpperCase()}</strong>
           <span>#${a.id}</span>
         </div>
-        <div>${a.listing_url || a.location || ''}</div>
+        <div>${a.search_url ? (a.location || 'Search alert') : (a.listing_url || a.location || '')}</div>
         <div class="controls">
           ${a.alert_type === 'search' ? `<button data-id="${a.id}" class="btn-run">Run now</button><button data-id="${a.id}" class="btn-view-listings">View listings</button>` : ''}
           <button data-id="${a.id}" class="btn-toggle">${a.is_active ? 'Deactivate' : 'Activate'}</button>
@@ -400,41 +425,17 @@ function savePreviewToLocalStorage() {
 }
 
 function loadPreviewFromLocalStorage() {
+  // Preview state restoration is only relevant if the search panel exists
+  if (!$('#page-size')) return null;
   try {
     const raw = localStorage.getItem('lastPreview');
     if (!raw) return null;
     const saved = JSON.parse(raw);
     if (!saved || !saved.params) return null;
-
-    // apply params to form fields so the UI reflects the restored search
-    const p = saved.params || {};
-    if (p.location) $('#search-location').value = p.location;
-    if (p.check_in) $('#search-check-in').value = p.check_in;
-    if (p.check_out) $('#search-check-out').value = p.check_out;
-    if (p.price_min) $('#price-min').value = p.price_min;
-    if (p.price_max) $('#price-max').value = p.price_max;
-    if (p.guests) $('#guests').value = p.guests;
-
-    // filters
-    if (typeof p.premium !== 'undefined') $('#filter-premium').checked = !!p.premium;
-    if (p.premium_min_price) $('#filter-premium-min').value = p.premium_min_price;
-    if (typeof p.popular !== 'undefined') $('#filter-popular').checked = !!p.popular;
-    if (p.popular_min_reviews) $('#filter-popular-min').value = p.popular_min_reviews;
-    if (typeof p.superhost !== 'undefined') $('#filter-superhost').checked = !!p.superhost;
-    if (typeof p.only_saved !== 'undefined') $('#filter-saved').checked = !!p.only_saved;
-
-    // selectedLocation (restore display_name + boundingbox)
-    if (saved.selectedLocation) {
-      selectedLocation = saved.selectedLocation;
-      $('#search-location').value = saved.selectedLocation.display_name || $('#search-location').value;
-    }
-
-    // restore paging controls
-    previewState.params = p;
-    previewState.page = saved.page || 1;
-    previewState.pageSize = saved.pageSize || previewState.pageSize;
-    $('#page-size').value = previewState.pageSize;
-
+    previewState.params    = saved.params;
+    previewState.page      = saved.page || 1;
+    previewState.pageSize  = saved.pageSize || previewState.pageSize;
+    const ps = $('#page-size'); if (ps) ps.value = previewState.pageSize;
     return saved;
   } catch (e) { return null; }
 }
@@ -705,10 +706,161 @@ async function loadAlerts() {
   }
 }
 
+// ── Billing / subscription ───────────────────────────────────────────────────
+
+let _currentSubscription = null; // cached so plan cards know what's active
+let _selectedPlanKey = null;
+
+const PLAN_DISPLAY = {
+  basic_monthly:   { name: 'Basic',            price: '$4.99',  billing: '$4.99 billed every month',  desc: '1 search, 1 email a day with newly available listings' },
+  premium_monthly: { name: 'Premium',           price: '$14.99', billing: '$14.99 billed every month', desc: '10 searches, email as soon as newly available listings detected' },
+  premium_yearly:  { name: 'Premium — yearly',  price: '$89.99', billing: '$89.99 billed every year',  desc: '10 searches, email as soon as newly available listings detected', badge: '50% off' },
+};
+
+async function loadSubscription() {
+  try {
+    const res = await apiRequest('GET', '/api/billing/subscription');
+    _currentSubscription = res;
+    renderPlanSummary(res);
+    document.getElementById('subscription-card').classList.remove('hidden');
+
+    // Show/hide create-alert card based on whether they have an active paid plan
+    const canCreate = canCreateAlerts(res);
+    document.getElementById('create-alert-card').classList.toggle('hidden', !canCreate);
+
+    // Show/hide upgrade button — hide if already on premium
+    const tier = res.subscription?.plan || 'free';
+    const isPremium = tier === 'premium' && ['active','trialing'].includes(res.subscription?.status);
+    $('#btn-upgrade').classList.toggle('hidden', isPremium);
+  } catch (err) {
+    console.error('loadSubscription error', err);
+  }
+}
+
+function canCreateAlerts(subData) {
+  if (!subData) return false;
+  const status = subData.subscription?.status;
+  const plan   = subData.subscription?.plan;
+  // Must have an active/trialing paid subscription
+  return ['active', 'trialing'].includes(status) && plan && plan !== 'free';
+}
+
+function renderPlanSummary(res) {
+  const el = $('#plan-summary');
+  if (!el) return;
+
+  const sub  = res.subscription;
+  const tier = sub?.plan || 'free';
+  const status = sub?.status || 'none';
+
+  const tierLabel = tier.charAt(0).toUpperCase() + tier.slice(1);
+  const badgeClass = tier === 'premium' ? 'premium' : tier === 'basic' ? 'basic' : 'free';
+
+  let detail = '';
+  if (!sub || tier === 'free') {
+    detail = 'No active subscription — upgrade to start monitoring listings.';
+  } else if (status === 'past_due') {
+    detail = '⚠️ Payment past due — please update your billing details.';
+  } else if (status === 'canceled') {
+    detail = 'Subscription cancelled.';
+  } else {
+    const periodEnd = sub.current_period_end
+      ? new Date(sub.current_period_end).toLocaleDateString()
+      : null;
+    const interval = sub.interval === 'year' ? 'yearly' : 'monthly';
+    detail = `${interval.charAt(0).toUpperCase() + interval.slice(1)} billing${periodEnd ? ` · renews ${periodEnd}` : ''}${sub.cancel_at_period_end ? ' · cancels at period end' : ''}`;
+  }
+
+  el.innerHTML = `<span class="tier-badge ${badgeClass}">${tierLabel}</span>${detail}`;
+}
+
+function renderPlanCards(currentPlanKey) {
+  const container = $('#plan-cards');
+  if (!container) return;
+  container.innerHTML = '';
+  _selectedPlanKey = null;
+  $('#btn-confirm-upgrade').disabled = true;
+
+  Object.entries(PLAN_DISPLAY).forEach(([key, plan]) => {
+    const isCurrent = key === currentPlanKey;
+    const card = document.createElement('div');
+    card.className = 'plan-card' + (isCurrent ? ' selected' : '');
+    card.dataset.key = key;
+    card.innerHTML = `
+      <div class="plan-card-header">
+        <div class="plan-radio"><div class="plan-radio-dot"></div></div>
+        <span class="plan-name">${plan.name}${plan.badge ? `<span class="plan-badge-yearly">${plan.badge}</span>` : ''}</span>
+        <span class="plan-price">${plan.price}</span>
+      </div>
+      <div class="plan-card-billing">${plan.billing}</div>
+      <div class="plan-card-desc">${plan.desc}</div>
+    `;
+    card.addEventListener('click', () => {
+      if (isCurrent) return; // can't reselect current plan
+      container.querySelectorAll('.plan-card').forEach(c => c.classList.remove('selected'));
+      card.classList.add('selected');
+      _selectedPlanKey = key;
+      $('#btn-confirm-upgrade').disabled = false;
+    });
+    container.appendChild(card);
+  });
+}
+
+async function handleUpgradeClick() {
+  const panel = $('#upgrade-panel');
+  panel.classList.remove('hidden');
+  $('#btn-upgrade').classList.add('hidden');
+
+  // Work out which plan key is currently active
+  const sub = _currentSubscription?.subscription;
+  let currentKey = null;
+  if (sub?.plan && sub?.interval) {
+    currentKey = sub.plan + '_' + sub.interval + 'ly'; // e.g. basic_monthly
+    if (sub.interval === 'year') currentKey = sub.plan + '_yearly';
+  }
+  renderPlanCards(currentKey);
+}
+
+async function handleConfirmUpgrade() {
+  if (!_selectedPlanKey) return;
+  const btn = $('#btn-confirm-upgrade');
+  setBtnLoading(btn, true, 'Redirecting…');
+  try {
+    const res = await apiRequest('POST', '/api/billing/checkout', { plan_key: _selectedPlanKey });
+    if (res.url) window.location.href = res.url;
+  } catch (err) {
+    if (err.already_subscribed) {
+      // Already subscribed — open portal to switch plans
+      showMessage('Opening billing portal to switch plans…');
+      await handleManageBilling();
+    } else {
+      showMessage(err.error || 'Failed to start checkout', true);
+    }
+  } finally {
+    setBtnLoading(btn, false);
+  }
+}
+
+async function handleManageBilling() {
+  const btn = $('#btn-manage-billing');
+  setBtnLoading(btn, true, 'Opening portal…');
+  try {
+    const res = await apiRequest('POST', '/api/billing/portal');
+    if (res.url) window.location.href = res.url;
+  } catch (err) {
+    showMessage(err.error || 'Failed to open billing portal', true);
+  } finally {
+    setBtnLoading(btn, false);
+  }
+}
+
 function showLoggedInState() {
   document.getElementById('btn-logout').classList.remove('hidden');
-  document.getElementById('create-alert-card').classList.remove('hidden');
+  loadSubscription();
   loadAlerts();
+  // Reveal alerts card always — loadAlerts fills it
+  document.getElementById('alerts-card').classList.remove('hidden');
+  document.getElementById('notifications-card').classList.remove('hidden');
 }
 
 function init() {
@@ -716,55 +868,63 @@ function init() {
   const token = localStorage.getItem('token');
   if (!token) return window.location.href = '/auth.html';
 
-  // schedule silent refresh for the existing token so users don't get logged out
+  // Schedule silent refresh for the existing token
   try { scheduleTokenRefresh(); } catch (e) { /* ignore */ }
 
-  // auth handlers are available on auth page; dashboard only needs logout
-  $('#btn-logout').onclick = handleLogout;
-  $('#btn-save-listing').onclick = createListingAlert;
-  $('#btn-preview-search').onclick = previewSearch;
-  $('#btn-refresh').onclick = loadAlerts;
-  $('#btn-create-search').onclick = createSearchAlert;
+  // Wire up buttons that exist in the DOM
+  const safeOn = (sel, handler) => { const el = $(sel); if (el) el.addEventListener('click', handler); };
+  const safeKey = (sel, handler) => { const el = $(sel); if (el) el.addEventListener('keydown', (e) => { if (e.key === 'Enter') handler(); }); };
+
+  safeOn('#btn-logout',           handleLogout);
+  safeOn('#btn-save-listing',     createListingAlert);
+  safeOn('#btn-create-url-alert', createUrlAlert);
+  safeOn('#btn-refresh',          loadAlerts);
+  safeKey('#alert-search-url',    createUrlAlert);
+
+  // Billing
+  safeOn('#btn-upgrade',          handleUpgradeClick);
+  safeOn('#btn-manage-billing',   handleManageBilling);
+  safeOn('#btn-confirm-upgrade',  handleConfirmUpgrade);
+  safeOn('#btn-cancel-upgrade',   () => {
+    $('#upgrade-panel').classList.add('hidden');
+    $('#btn-upgrade').classList.remove('hidden');
+  });
+
+  // Handle return from Stripe Checkout
+  const urlParams = new URLSearchParams(window.location.search);
+  if (urlParams.get('checkout') === 'success') {
+    showMessage('Payment successful — your plan is now active!');
+    history.replaceState({}, '', '/');
+  } else if (urlParams.get('checkout') === 'cancelled') {
+    showMessage('Checkout cancelled — no charge was made.', true);
+    history.replaceState({}, '', '/');
+  }
+
+  // Pagination controls (only wire if elements exist)
+  const pageSizeEl = $('#page-size');
+  if (pageSizeEl) pageSizeEl.onchange = (e) => {
+    previewState.pageSize = parseInt(e.target.value, 10) || 20;
+    fetchPreviewPage(previewState.page);
+  };
+
+  safeOn('#btn-prev-page', () => {
+    if (previewState.page > 1) fetchPreviewPage(previewState.page - 1);
+  });
+  safeOn('#btn-next-page', () => {
+    const maxPage = Math.ceil((previewState.total || 0) / previewState.pageSize) || 1;
+    if (previewState.page < maxPage) fetchPreviewPage(previewState.page + 1);
+  });
+  safeOn('#btn-load-more', () => {
+    const maxPage = Math.ceil((previewState.total || 0) / previewState.pageSize) || 1;
+    if (previewState.page < maxPage) fetchPreviewPage(previewState.page + 1);
+  });
+
+  // Confirm modal
+  safeOn('#confirm-cancel', () => closeConfirm(false));
+  safeOn('#confirm-ok',     () => closeConfirm(true));
 
   showLoggedInState();
   loadNotifications();
-
-  // pagination / preview controls
-  $('#page-size').onchange = (e) => {
-    previewState.pageSize = parseInt(e.target.value, 10) || 20;
-    // reload current page with new page size
-    fetchPreviewPage(previewState.page);
-  };
-  $('#btn-prev-page').onclick = () => {
-    const btn = $('#btn-prev-page');
-    if (previewState.page > 1) { setBtnLoading(btn, true); fetchPreviewPage(previewState.page - 1).finally(() => setBtnLoading(btn, false)); }
-  };
-  $('#btn-next-page').onclick = () => {
-    const btn = $('#btn-next-page');
-    const maxPage = Math.ceil((previewState.total || 0) / previewState.pageSize) || 1;
-    if (previewState.page < maxPage) { setBtnLoading(btn, true); fetchPreviewPage(previewState.page + 1).finally(() => setBtnLoading(btn, false)); }
-  };
-  $('#btn-load-more').onclick = () => {
-    const btn = $('#btn-load-more');
-    const maxPage = Math.ceil((previewState.total || 0) / previewState.pageSize) || 1;
-    if (previewState.page < maxPage) { setBtnLoading(btn, true); fetchPreviewPage(previewState.page + 1).finally(() => setBtnLoading(btn, false)); }
-  };
-
-  // initialize location autocomplete
-  initLocationAutocomplete();
-
-  // restore last preview (if any) and auto-run it so refresh preserves state
-  const restored = loadPreviewFromLocalStorage();
-  if (restored && restored.params) {
-    // show the listings panel and fetch the saved page
-    document.getElementById('listings-panel').classList.remove('hidden');
-    setBtnLoading($('#btn-preview-search'), true);
-    fetchPreviewPage(restored.page || 1).finally(() => setBtnLoading($('#btn-preview-search'), false));
-  }
-
-  // confirm modal wiring
-  $('#confirm-cancel').onclick = () => closeConfirm(false);
-  $('#confirm-ok').onclick = () => closeConfirm(true);
 }
 
 // confirm modal helper (returns Promise)
