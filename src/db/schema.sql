@@ -7,7 +7,7 @@ CREATE TABLE IF NOT EXISTS users (
   display_name VARCHAR(255),
   avatar_url TEXT,
   email_verified BOOLEAN DEFAULT FALSE,
-  subscription_tier VARCHAR(20) DEFAULT 'basic' CHECK (subscription_tier IN ('basic', 'premium')),
+  subscription_tier VARCHAR(20) DEFAULT 'basic' CHECK (subscription_tier IN ('free', 'basic', 'premium')),
   subscription_status VARCHAR(20) DEFAULT 'active' CHECK (subscription_status IN ('active', 'cancelled', 'expired')),
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -55,7 +55,11 @@ CREATE TABLE IF NOT EXISTS search_alerts (
   last_notified TIMESTAMP,
   notification_count INTEGER DEFAULT 0,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  
+  -- For free tier alerts (24-hour limitation)
+  is_free_trial BOOLEAN DEFAULT FALSE,
+  expires_at TIMESTAMP
 );
 
 -- Listings table (cache of discovered listings)
@@ -93,11 +97,20 @@ CREATE TABLE IF NOT EXISTS search_results (
   search_alert_id INTEGER REFERENCES search_alerts(id) ON DELETE CASCADE,
   listing_id VARCHAR(100) REFERENCES listings(listing_id) ON DELETE CASCADE,
   detected_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  notification_sent BOOLEAN DEFAULT FALSE,
   change_type VARCHAR(20) CHECK (change_type IN ('new', 'freed_up', 'price_drop')),
   old_price DECIMAL(10, 2),
-  new_price DECIMAL(10, 2)
+  new_price DECIMAL(10, 2),
+  UNIQUE (search_alert_id, listing_id)
 );
+
+-- Extra columns added post-launch (safe to run on existing DBs)
+ALTER TABLE search_alerts ADD COLUMN IF NOT EXISTS search_url TEXT;
+ALTER TABLE search_alerts ADD COLUMN IF NOT EXISTS url_params JSONB;
+ALTER TABLE search_alerts ADD COLUMN IF NOT EXISTS instant_book BOOLEAN DEFAULT FALSE;
+ALTER TABLE search_alerts ADD COLUMN IF NOT EXISTS guest_favorite BOOLEAN DEFAULT FALSE;
+ALTER TABLE search_alerts ADD COLUMN IF NOT EXISTS min_beds INTEGER;
+ALTER TABLE search_alerts ADD COLUMN IF NOT EXISTS infants INTEGER;
+ALTER TABLE search_alerts ADD COLUMN IF NOT EXISTS monthly_search BOOLEAN DEFAULT FALSE;
 
 -- Notifications log
 CREATE TABLE IF NOT EXISTS notifications (
@@ -111,60 +124,12 @@ CREATE TABLE IF NOT EXISTS notifications (
   email_error TEXT
 );
 
--- Add webhook delivery columns (safe to run repeatedly)
-ALTER TABLE notifications ADD COLUMN IF NOT EXISTS webhook_sent BOOLEAN DEFAULT FALSE;
-ALTER TABLE notifications ADD COLUMN IF NOT EXISTS webhook_error TEXT;
-
 -- Indexes for performance
-CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
-CREATE INDEX IF NOT EXISTS idx_search_alerts_user_id ON search_alerts(user_id);
-CREATE INDEX IF NOT EXISTS idx_search_alerts_active ON search_alerts(is_active);
-CREATE INDEX IF NOT EXISTS idx_listings_listing_id ON listings(listing_id);
-CREATE INDEX IF NOT EXISTS idx_listings_location ON listings(lat, lng);
-CREATE INDEX IF NOT EXISTS idx_search_results_search_id ON search_results(search_alert_id);
-CREATE INDEX IF NOT EXISTS idx_search_results_listing_id ON search_results(listing_id);
-CREATE INDEX IF NOT EXISTS idx_notifications_user_id ON notifications(user_id);
-
--- Google OAuth + email verification columns (safe on existing DBs)
-ALTER TABLE users ADD COLUMN IF NOT EXISTS google_id VARCHAR(255) UNIQUE;
-ALTER TABLE users ADD COLUMN IF NOT EXISTS display_name VARCHAR(255);
-ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar_url TEXT;
-ALTER TABLE users ADD COLUMN IF NOT EXISTS email_verified BOOLEAN DEFAULT FALSE;
-ALTER TABLE users ALTER COLUMN password_hash DROP NOT NULL;
-
--- URL-based alert support
-ALTER TABLE search_alerts ADD COLUMN IF NOT EXISTS search_url TEXT;
-ALTER TABLE search_alerts ADD COLUMN IF NOT EXISTS url_params JSONB;
-
--- Prevent duplicate seen-listing rows per alert
-CREATE UNIQUE INDEX IF NOT EXISTS idx_search_results_alert_listing
-  ON search_results (search_alert_id, listing_id);
-
--- Stripe billing
-ALTER TABLE users ADD COLUMN IF NOT EXISTS stripe_customer_id VARCHAR(255) UNIQUE;
-ALTER TABLE users ADD COLUMN IF NOT EXISTS trial_ends_at TIMESTAMP;
-
-CREATE TABLE IF NOT EXISTS subscriptions (
-  id SERIAL PRIMARY KEY,
-  user_id INTEGER REFERENCES users(id) ON DELETE CASCADE UNIQUE,
-  stripe_subscription_id VARCHAR(255) UNIQUE,
-  stripe_price_id VARCHAR(255),
-  plan VARCHAR(20) NOT NULL DEFAULT 'free' CHECK (plan IN ('free', 'basic', 'premium')),
-  interval VARCHAR(10) CHECK (interval IN ('month', 'year')),
-  status VARCHAR(30) NOT NULL DEFAULT 'active',  -- active | past_due | canceled | trialing
-  current_period_end TIMESTAMP,
-  cancel_at_period_end BOOLEAN DEFAULT FALSE,
-  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
-
-CREATE INDEX IF NOT EXISTS idx_subscriptions_user ON subscriptions(user_id);
-CREATE INDEX IF NOT EXISTS idx_subscriptions_stripe_id ON subscriptions(stripe_subscription_id);
-
--- Refresh tokens (for JWT refresh flow)
-CREATE TABLE IF NOT EXISTS refresh_tokens (
-  token_hash VARCHAR(128) PRIMARY KEY,
-  user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
-  expires_at TIMESTAMP NOT NULL,
-  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
+CREATE INDEX idx_users_email ON users(email);
+CREATE INDEX idx_search_alerts_user_id ON search_alerts(user_id);
+CREATE INDEX idx_search_alerts_active ON search_alerts(is_active);
+CREATE INDEX idx_listings_listing_id ON listings(listing_id);
+CREATE INDEX idx_listings_location ON listings(lat, lng);
+CREATE INDEX idx_search_results_search_id ON search_results(search_alert_id);
+CREATE INDEX idx_search_results_listing_id ON search_results(listing_id);
+CREATE INDEX idx_notifications_user_id ON notifications(user_id);

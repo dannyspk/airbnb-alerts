@@ -168,21 +168,38 @@ function handleLogout() {
 
 async function createUrlAlert() {
   const btn = $('#btn-create-url-alert');
+  // Prevent free/basic users from creating >1 search — show upgrade modal instead
+  try {
+    const ok = await ensureCanCreateSearchAlert();
+    if (!ok) return;
+  } catch (e) {
+    // if check fails, allow backend to enforce limits
+  }
   setBtnLoading(btn, true, 'Saving...');
   try {
     const search_url = $('#alert-search-url').value.trim();
     if (!search_url) return showMessage('Please paste an Airbnb search URL', true);
     if (!search_url.includes('airbnb.com')) return showMessage('URL must be from airbnb.com', true);
     const res = await apiRequest('POST', '/api/alerts/url', { search_url });
-    showMessage(res.message || 'Alert saved!');
+    
+    // Show appropriate message based on alert type
+    if (res.is_free_trial) {
+      showMessage('Free alert created! This alert will expire in 24 hours. Upgrade to create permanent alerts.');
+    } else {
+      showMessage(res.message || 'Alert saved!');
+    }
+    
     $('#alert-search-url').value = '';
+  const previewEl = $('#alert-search-preview'); if (previewEl) { previewEl.classList.add('hidden'); previewEl.setAttribute('aria-hidden', 'true'); previewEl.textContent = ''; }
     loadAlerts();
+    try { showAlertCreatedModal(); } catch (e) { /* ignore */ }
   } catch (err) {
     if (err.upgrade_required) {
       showMessage(err.error, true);
-      // Scroll to subscription card and pop open the upgrade picker
-      document.getElementById('subscription-card')?.scrollIntoView({ behavior: 'smooth' });
-      setTimeout(() => handleUpgradeClick(), 400);
+      // Redirect to billing page to upgrade
+      setTimeout(() => {
+        window.location.href = '/billing.html';
+      }, 1500);
     } else {
       showMessage(err.error || JSON.stringify(err), true);
     }
@@ -191,21 +208,105 @@ async function createUrlAlert() {
   }
 }
 
-async function createListingAlert() {
-  const btn = $('#btn-save-listing');
-  setBtnLoading(btn, true, 'Saving...');
+// (Listing-specific alert UI removed — only URL/search alerts remain in the frontend)
+
+// (Listing-specific alert UI removed — only URL/search alerts remain in the frontend)
+
+// Parse a full Airbnb search URL and return important filters (client-side)
+function parseAirbnbSearchUrl(urlString) {
   try {
-    const listing_id = $('#listing-id').value;
-    const listing_url = $('#listing-url').value;
-    const check_in = $('#check-in').value || null;
-    const check_out = $('#check-out').value || null;
-    const res = await apiRequest('POST', '/api/alerts/listing', { listing_id, listing_url, check_in, check_out });
-    showMessage('Listing alert saved');
-    loadAlerts();
-  } catch (err) {
-    showMessage(err.error || JSON.stringify(err), true);
-  } finally {
-    setBtnLoading(btn, false);
+    const url = new URL(urlString);
+    if (!url.hostname.includes('airbnb.com')) return null;
+    const sp = url.searchParams;
+    const asInt = (v) => { const n = parseInt(v, 10); return Number.isFinite(n) ? n : null; };
+    const adults = asInt(sp.get('adults')) || 0;
+    const children = asInt(sp.get('children')) || 0;
+    const guests = (adults + children) || asInt(sp.get('guests')) || null;
+    const amenities = sp.getAll('amenities[]').length ? sp.getAll('amenities[]') : sp.getAll('amenities');
+    const price_min = asInt(sp.get('price_min')) || null;
+    const price_max = asInt(sp.get('price_max')) || null;
+    const check_in = sp.get('checkin') || sp.get('check_in') || null;
+    const check_out = sp.get('checkout') || sp.get('check_out') || null;
+    const monthly_start_date = sp.get('monthly_start_date') || null;
+    const monthly_length = asInt(sp.get('monthly_length')) || null;
+    let monthly_end_date = sp.get('monthly_end_date') || null;
+    if (monthly_start_date && monthly_length) {
+      try {
+        const parts = monthly_start_date.split('-').map(Number);
+        if (parts.length === 3) {
+          const d = new Date(parts[0], parts[1] - 1, parts[2]);
+          const end = new Date(d.getFullYear(), d.getMonth() + monthly_length, d.getDate());
+          end.setDate(end.getDate() - 1);
+          const yyyy = end.getFullYear();
+          const mm = String(end.getMonth() + 1).padStart(2, '0');
+          const dd = String(end.getDate()).padStart(2, '0');
+          monthly_end_date = `${yyyy}-${mm}-${dd}`;
+        }
+      } catch (e) { /* ignore */ }
+    }
+    const location = sp.get('query') || null;
+    return { location, check_in, check_out, guests, amenities, price_min, price_max, monthly_start_date, monthly_length, monthly_end_date, monthly_search: !!(monthly_start_date || monthly_length), rawParams: Object.fromEntries(sp.entries()) };
+  } catch (e) { return null; }
+}
+
+function showSearchUrlPreview() {
+  try {
+    const el = $('#alert-search-url');
+    if (!el) return;
+    const previewEl = $('#alert-search-preview');
+    const parsed = parseAirbnbSearchUrl(el.value.trim());
+    // hide preview when nothing parseable
+    if (!previewEl) {
+      // no inline preview container available — nothing to do
+      return;
+    }
+
+    if (!parsed) {
+      previewEl.classList.add('hidden');
+      previewEl.setAttribute('aria-hidden', 'true');
+      previewEl.textContent = '';
+      return;
+    }
+
+    // build inline preview nodes (safe textContent usage)
+    previewEl.innerHTML = '';
+    if (parsed.location) {
+      const l = document.createElement('span'); l.className = 'loc'; l.textContent = parsed.location; previewEl.appendChild(l);
+    }
+    if (parsed.check_in && parsed.check_out) {
+      const d = document.createElement('span'); d.className = 'badge date-range'; d.textContent = `${formatDateForDisplay(parsed.check_in)} → ${formatDateForDisplay(parsed.check_out)}`; previewEl.appendChild(d);
+    }
+  
+    if (parsed.guests) {
+      const g = document.createElement('span'); g.className = 'small'; g.textContent = `${parsed.guests} guests`; previewEl.appendChild(g);
+    }
+    if (parsed.price_min || parsed.price_max) {
+      const p = document.createElement('span'); p.className = 'small'; p.textContent = `$${parsed.price_min || '0'}–${parsed.price_max || '∞'}`; previewEl.appendChild(p);
+    }
+
+    previewEl.classList.remove('hidden');
+    previewEl.setAttribute('aria-hidden', 'false');
+  } catch (e) { /* ignore */ }
+}
+
+// Normalize/format date strings for display in the UI (keep YYYY-MM-DD)
+function formatDateForDisplay(d) {
+  if (!d) return '';
+  try {
+    const s = String(d);
+    // If it's an ISO with time (2026-03-02T00:00:00.000Z) just take the date portion
+    if (s.indexOf('T') !== -1) return s.split('T')[0];
+    // If already YYYY-MM-DD, return as-is
+    if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+    // Fallback: try to parse and format as YYYY-MM-DD
+    const dt = new Date(s);
+    if (Number.isNaN(dt.getTime())) return s;
+    const yyyy = dt.getFullYear();
+    const mm = String(dt.getMonth() + 1).padStart(2, '0');
+    const dd = String(dt.getDate()).padStart(2, '0');
+    return `${yyyy}-${mm}-${dd}`;
+  } catch (e) {
+    return String(d);
   }
 }
 
@@ -220,41 +321,43 @@ function renderAlerts(alerts) {
   alerts.forEach((a) => {
     const div = document.createElement('div');
     div.className = 'alert-item';
+    
+    // Show expiration for free trial alerts
+    let expirationInfo = '';
+    if (a.is_free_trial && a.expires_at) {
+      const expiresDate = new Date(a.expires_at);
+      const now = new Date();
+      const hoursLeft = Math.max(0, Math.floor((expiresDate - now) / (1000 * 60 * 60)));
+      // show running frequency for free/basic users instead of the literal "Free trial" label
+      expirationInfo = `<span class="badge free-trial">Running 1x per day</span>`;
+    }
+    
+    const controlsHtml = `
+        <div class="controls">
+          ${a.alert_type === 'search' ? `<button data-id="${a.id}" class="btn-see-search">See your search</button>` : ''}
+          <button data-id="${a.id}" class="btn-unsubscribe">Unsubscribe</button>
+        </div>
+      `;
+    
     div.innerHTML = `
         <div class="meta">
-          <strong>${a.alert_type.toUpperCase()}</strong>
-          <span>#${a.id}</span>
-        </div>
-        <div>${a.search_url ? (a.location || 'Search alert') : (a.listing_url || a.location || '')}</div>
-        <div class="controls">
-          ${a.alert_type === 'search' ? `<button data-id="${a.id}" class="btn-run">Run now</button><button data-id="${a.id}" class="btn-view-listings">View listings</button>` : ''}
-          <button data-id="${a.id}" class="btn-toggle">${a.is_active ? 'Deactivate' : 'Activate'}</button>
-          <button data-id="${a.id}" class="btn-delete">Delete</button>
-        </div>
+              ${a.check_in && a.check_out ? `<span class="badge date-range">${formatDateForDisplay(a.check_in)} → ${formatDateForDisplay(a.check_out)}</span>` : ''}
+              ${expirationInfo}
+            </div>
+        <div>${a.search_url ? (a.location || '') : (a.listing_url || a.location || '')}</div>
+        ${controlsHtml}
       `;
     container.appendChild(div);
   });
+  
+  console.log('Rendered alerts:', alerts.length);
 
-  document.querySelectorAll('.btn-toggle').forEach((btn) => {
-    btn.onclick = async (e) => {
-      const id = e.target.dataset.id;
-      const alert = alerts.find(x => x.id == id);
-      try {
-        await apiRequest('PUT', `/api/alerts/${id}`, { is_active: !alert.is_active });
-        showMessage('Alert updated');
-        loadAlerts();
-      } catch (err) {
-        showMessage(err.error || JSON.stringify(err), true);
-      }
-    };
-  });
-
-  document.querySelectorAll('.btn-delete').forEach((btn) => {
+  document.querySelectorAll('.btn-unsubscribe').forEach((btn) => {
     btn.onclick = async (e) => {
       const id = e.target.dataset.id;
       try {
         await apiRequest('DELETE', `/api/alerts/${id}`);
-        showMessage('Alert deleted');
+        showMessage('Unsubscribed');
         loadAlerts();
       } catch (err) {
         showMessage(err.error || JSON.stringify(err), true);
@@ -262,29 +365,26 @@ function renderAlerts(alerts) {
     };
   });
 
-  // Run now / View listings for search alerts
-  document.querySelectorAll('.btn-run').forEach((btn) => {
-    btn.onclick = async (e) => {
-      const id = e.target.dataset.id;
-      try {
-        await apiRequest('POST', `/api/alerts/${id}/run`);
-        showMessage('Queued job — results will appear shortly');
-      } catch (err) {
-        showMessage(err.error || JSON.stringify(err), true);
-      }
-    };
-  });
+  // (manual "Run now" no longer available in the UI)
 
-  document.querySelectorAll('.btn-view-listings').forEach((btn) => {
+  document.querySelectorAll('.btn-see-search').forEach((btn) => {
     btn.onclick = async (e) => {
       const id = e.target.dataset.id;
-      viewListingsForAlert(id);
+      const alertItem = alerts.find(x => x.id == id) || {};
+      const url = alertItem.search_url || alertItem.searchUrl || '';
+      if (!url) return showMessage('No search URL available', true);
+      showSearchModal(url);
     };
   });
 }
 
 async function createSearchAlert() {
   const btn = $('#btn-create-search');
+  // Prevent free/basic users from creating >1 search — show upgrade modal instead
+  try {
+    const ok = await ensureCanCreateSearchAlert();
+    if (!ok) return;
+  } catch (e) { /* allow server-side enforcement */ }
   setBtnLoading(btn, true, 'Creating...');
   try {
     const location = $('#search-location').value;
@@ -323,7 +423,7 @@ async function viewListingsForAlert(alertId) {
 function renderListings(listings) {
   const container = $('#listings-list');
   if (!listings || listings.length === 0) {
-    container.innerHTML = '<i>No listings yet — try "Run now" or wait a few seconds</i>';
+    container.innerHTML = '<i>No listings yet — wait a few seconds</i>';
     return;
   }
 
@@ -357,7 +457,6 @@ function renderListings(listings) {
           <span class="rating">⭐ ${l.rating ? (l.rating.guest_satisfaction || l.rating) : '—'}</span>
         </div>
         <div class="listing-actions">
-          <button data-id="${id}" class="btn-save-listing-inline" ${(!id || id === 'None') ? 'disabled' : ''}>Save listing</button>
           <button data-id="${id}" class="btn-open-details">Details</button>
           <button data-url="${l.url || ''}" class="btn-share">Share</button>
         </div>
@@ -366,26 +465,7 @@ function renderListings(listings) {
     grid.appendChild(card);
   });
 
-  // inline save requires confirmation
-  document.querySelectorAll('.btn-save-listing-inline').forEach((btn) => {
-    btn.onclick = async (e) => {
-      const listingId = e.target.dataset.id;
-      const confirmed = await confirmAction('Save this listing as an alert?');
-      if (!confirmed) return;
-      const listing = listings.find(x => (x.id || x.listing_id || x.listingId) == listingId) || {};
-      const b = e.target;
-      setBtnLoading(b, true, 'Saving...');
-      try {
-        await apiRequest('POST', '/api/alerts/listing', { listing_id: listingId, listing_url: listing.url || '' });
-        showMessage('Listing saved as alert');
-        loadAlerts();
-      } catch (err) {
-        showMessage(err.error || JSON.stringify(err), true);
-      } finally {
-        setBtnLoading(b, false);
-      }
-    };
-  });
+  // (inline "Save listing" action removed from UI)
 
   document.querySelectorAll('.btn-open-details').forEach((btn) => {
     btn.onclick = async (e) => {
@@ -628,7 +708,6 @@ function renderPreviewResults(results, total) {
           <span class="rating">⭐ ${l.rating ? (l.rating.guest_satisfaction || l.rating.value || l.rating) : '—'}</span>
         </div>
         <div class="listing-actions">
-          <button data-id="${id}" class="btn-save-listing-inline" ${(!id || id === 'None' || l.isSaved) ? 'disabled' : ''}>${l.isSaved ? 'Saved' : 'Save listing'}</button>
           <button data-id="${id}" class="btn-open-details">Details</button>
           <button data-url="${l.url || ''}" class="btn-share">Share</button>
         </div>
@@ -638,25 +717,7 @@ function renderPreviewResults(results, total) {
   });
 
   // wire up buttons
-  document.querySelectorAll('.btn-save-listing-inline').forEach((btn) => {
-    btn.onclick = async (e) => {
-      const listingId = e.target.dataset.id;
-      const confirmed = await confirmAction('Save this listing as an alert?');
-      if (!confirmed) return;
-      const listing = previewState.results.find(x => (x.id || x.listing_id || x.listingId) == listingId) || {};
-      const b = e.target;
-      setBtnLoading(b, true, 'Saving...');
-      try {
-        await apiRequest('POST', '/api/alerts/listing', { listing_id: listingId, listing_url: listing.url || '' });
-        showMessage('Listing saved as alert');
-        loadAlerts();
-      } catch (err) {
-        showMessage(err.error || JSON.stringify(err), true);
-      } finally {
-        setBtnLoading(b, false);
-      }
-    };
-  });
+  // (inline "Save listing" action removed from preview results)
 
   document.querySelectorAll('.btn-open-details').forEach((btn) => {
     btn.onclick = (e) => showListingModal(e.target.dataset.id);
@@ -702,161 +763,79 @@ async function loadAlerts() {
     renderAlerts(res.alerts || []);
     document.getElementById('alerts-card').classList.remove('hidden');
   } catch (err) {
+    console.error('Failed to load alerts:', err);
     showMessage('Failed to load alerts — are you logged in?', true);
   }
 }
 
-// ── Billing / subscription ───────────────────────────────────────────────────
 
-let _currentSubscription = null; // cached so plan cards know what's active
-let _selectedPlanKey = null;
 
-const PLAN_DISPLAY = {
-  basic_monthly:   { name: 'Basic',            price: '$4.99',  billing: '$4.99 billed every month',  desc: '1 search, 1 email a day with newly available listings' },
-  premium_monthly: { name: 'Premium',           price: '$14.99', billing: '$14.99 billed every month', desc: '10 searches, email as soon as newly available listings detected' },
-  premium_yearly:  { name: 'Premium — yearly',  price: '$89.99', billing: '$89.99 billed every year',  desc: '10 searches, email as soon as newly available listings detected', badge: '50% off' },
-};
+async function showLoggedInState() {
+  // Show user menu
+  document.getElementById('user-menu-btn').classList.remove('hidden');
 
-async function loadSubscription() {
-  try {
-    const res = await apiRequest('GET', '/api/billing/subscription');
-    _currentSubscription = res;
-    renderPlanSummary(res);
-    document.getElementById('subscription-card').classList.remove('hidden');
-
-    // Show/hide create-alert card based on whether they have an active paid plan
-    const canCreate = canCreateAlerts(res);
-    document.getElementById('create-alert-card').classList.toggle('hidden', !canCreate);
-
-    // Show/hide upgrade button — hide if already on premium
-    const tier = res.subscription?.plan || 'free';
-    const isPremium = tier === 'premium' && ['active','trialing'].includes(res.subscription?.status);
-    $('#btn-upgrade').classList.toggle('hidden', isPremium);
-  } catch (err) {
-    console.error('loadSubscription error', err);
-  }
-}
-
-function canCreateAlerts(subData) {
-  if (!subData) return false;
-  const status = subData.subscription?.status;
-  const plan   = subData.subscription?.plan;
-  // Must have an active/trialing paid subscription
-  return ['active', 'trialing'].includes(status) && plan && plan !== 'free';
-}
-
-function renderPlanSummary(res) {
-  const el = $('#plan-summary');
-  if (!el) return;
-
-  const sub  = res.subscription;
-  const tier = sub?.plan || 'free';
-  const status = sub?.status || 'none';
-
-  const tierLabel = tier.charAt(0).toUpperCase() + tier.slice(1);
-  const badgeClass = tier === 'premium' ? 'premium' : tier === 'basic' ? 'basic' : 'free';
-
-  let detail = '';
-  if (!sub || tier === 'free') {
-    detail = 'No active subscription — upgrade to start monitoring listings.';
-  } else if (status === 'past_due') {
-    detail = '⚠️ Payment past due — please update your billing details.';
-  } else if (status === 'canceled') {
-    detail = 'Subscription cancelled.';
-  } else {
-    const periodEnd = sub.current_period_end
-      ? new Date(sub.current_period_end).toLocaleDateString()
-      : null;
-    const interval = sub.interval === 'year' ? 'yearly' : 'monthly';
-    detail = `${interval.charAt(0).toUpperCase() + interval.slice(1)} billing${periodEnd ? ` · renews ${periodEnd}` : ''}${sub.cancel_at_period_end ? ' · cancels at period end' : ''}`;
-  }
-
-  el.innerHTML = `<span class="tier-badge ${badgeClass}">${tierLabel}</span>${detail}`;
-}
-
-function renderPlanCards(currentPlanKey) {
-  const container = $('#plan-cards');
-  if (!container) return;
-  container.innerHTML = '';
-  _selectedPlanKey = null;
-  $('#btn-confirm-upgrade').disabled = true;
-
-  Object.entries(PLAN_DISPLAY).forEach(([key, plan]) => {
-    const isCurrent = key === currentPlanKey;
-    const card = document.createElement('div');
-    card.className = 'plan-card' + (isCurrent ? ' selected' : '');
-    card.dataset.key = key;
-    card.innerHTML = `
-      <div class="plan-card-header">
-        <div class="plan-radio"><div class="plan-radio-dot"></div></div>
-        <span class="plan-name">${plan.name}${plan.badge ? `<span class="plan-badge-yearly">${plan.badge}</span>` : ''}</span>
-        <span class="plan-price">${plan.price}</span>
-      </div>
-      <div class="plan-card-billing">${plan.billing}</div>
-      <div class="plan-card-desc">${plan.desc}</div>
-    `;
-    card.addEventListener('click', () => {
-      if (isCurrent) return; // can't reselect current plan
-      container.querySelectorAll('.plan-card').forEach(c => c.classList.remove('selected'));
-      card.classList.add('selected');
-      _selectedPlanKey = key;
-      $('#btn-confirm-upgrade').disabled = false;
-    });
-    container.appendChild(card);
-  });
-}
-
-async function handleUpgradeClick() {
-  const panel = $('#upgrade-panel');
-  panel.classList.remove('hidden');
-  $('#btn-upgrade').classList.add('hidden');
-
-  // Work out which plan key is currently active
-  const sub = _currentSubscription?.subscription;
-  let currentKey = null;
-  if (sub?.plan && sub?.interval) {
-    currentKey = sub.plan + '_' + sub.interval + 'ly'; // e.g. basic_monthly
-    if (sub.interval === 'year') currentKey = sub.plan + '_yearly';
-  }
-  renderPlanCards(currentKey);
-}
-
-async function handleConfirmUpgrade() {
-  if (!_selectedPlanKey) return;
-  const btn = $('#btn-confirm-upgrade');
-  setBtnLoading(btn, true, 'Redirecting…');
-  try {
-    const res = await apiRequest('POST', '/api/billing/checkout', { plan_key: _selectedPlanKey });
-    if (res.url) window.location.href = res.url;
-  } catch (err) {
-    if (err.already_subscribed) {
-      // Already subscribed — open portal to switch plans
-      showMessage('Opening billing portal to switch plans…');
-      await handleManageBilling();
-    } else {
-      showMessage(err.error || 'Failed to start checkout', true);
+  // Load user email + subscription tier from token (fallback to /api/auth/me)
+  const token = localStorage.getItem('token');
+  let payload = null;
+  let tier = null;
+  if (token) {
+    try { payload = decodeJwt(token); } catch (e) { payload = null; }
+    if (payload && payload.email) {
+      const emailEl = document.getElementById('user-email-display');
+      if (emailEl) emailEl.textContent = payload.email;
     }
-  } finally {
-    setBtnLoading(btn, false);
+    tier = payload && payload.subscription_tier ? payload.subscription_tier : null;
   }
-}
 
-async function handleManageBilling() {
-  const btn = $('#btn-manage-billing');
-  setBtnLoading(btn, true, 'Opening portal…');
+  // show a small tier badge in the user menu for debugging/visibility
   try {
-    const res = await apiRequest('POST', '/api/billing/portal');
-    if (res.url) window.location.href = res.url;
-  } catch (err) {
-    showMessage(err.error || 'Failed to open billing portal', true);
-  } finally {
-    setBtnLoading(btn, false);
-  }
-}
+    const userMenuBtn = document.getElementById('user-menu-btn');
+    if (userMenuBtn) {
+      let tierEl = document.getElementById('user-tier-badge');
+      if (!tierEl) {
+        tierEl = document.createElement('span');
+        tierEl.id = 'user-tier-badge';
+        tierEl.className = 'user-tier-badge';
+        const emailEl = document.getElementById('user-email-display');
+        if (emailEl && emailEl.parentNode) emailEl.parentNode.insertBefore(tierEl, emailEl.nextSibling);
+        else userMenuBtn.appendChild(tierEl);
+      }
+      // update display (will be updated again after /api/auth/me if needed)
+      if (tier) {
+        tierEl.textContent = tier.charAt(0).toUpperCase() + tier.slice(1);
+        tierEl.className = `user-tier-badge ${tier}`;
+      } else {
+        tierEl.textContent = '';
+        tierEl.className = 'user-tier-badge';
+      }
+    }
+  } catch (e) { /* ignore */ }
 
-function showLoggedInState() {
-  document.getElementById('btn-logout').classList.remove('hidden');
-  loadSubscription();
+  // If JWT doesn't include subscription_tier (or it's unreliable), fetch server-side
+  if (!tier) {
+    try {
+      const res = await apiRequest('GET', '/api/auth/me');
+      if (res && res.user && res.user.subscription_tier) tier = res.user.subscription_tier;
+    } catch (e) {
+      // ignore — we'll default to hiding the free banner
+    }
+  }
+
+  // debug: show resolved tier in console for troubleshooting
+  try { console.debug('Resolved subscription_tier for UI:', tier, ' (payload)', payload); } catch (e) { /* ignore */ }
+
+  // Show/hide the free-trial notice: only for explicit "free" tier users
+  try {
+    const freeNotice = document.getElementById('free-trial-notice');
+    if (freeNotice) {
+      if (tier === 'free') freeNotice.style.display = '';
+      else freeNotice.style.display = 'none';
+    }
+  } catch (e) { /* ignore */ }
+  
+  // Show create alert card for all users (free users can now create alerts)
+  document.getElementById('create-alert-card').classList.remove('hidden');
+  
   loadAlerts();
   // Reveal alerts card always — loadAlerts fills it
   document.getElementById('alerts-card').classList.remove('hidden');
@@ -876,28 +855,35 @@ function init() {
   const safeKey = (sel, handler) => { const el = $(sel); if (el) el.addEventListener('keydown', (e) => { if (e.key === 'Enter') handler(); }); };
 
   safeOn('#btn-logout',           handleLogout);
-  safeOn('#btn-save-listing',     createListingAlert);
   safeOn('#btn-create-url-alert', createUrlAlert);
   safeOn('#btn-refresh',          loadAlerts);
   safeKey('#alert-search-url',    createUrlAlert);
 
-  // Billing
-  safeOn('#btn-upgrade',          handleUpgradeClick);
-  safeOn('#btn-manage-billing',   handleManageBilling);
-  safeOn('#btn-confirm-upgrade',  handleConfirmUpgrade);
-  safeOn('#btn-cancel-upgrade',   () => {
-    $('#upgrade-panel').classList.add('hidden');
-    $('#btn-upgrade').classList.remove('hidden');
-  });
+  const alertSearchUrlEl = $('#alert-search-url');
+  if (alertSearchUrlEl) {
+    alertSearchUrlEl.addEventListener('paste', () => setTimeout(showSearchUrlPreview, 50));
+    alertSearchUrlEl.addEventListener('blur', showSearchUrlPreview);
+    alertSearchUrlEl.addEventListener('input', showSearchUrlPreview);
+  }
 
-  // Handle return from Stripe Checkout
-  const urlParams = new URLSearchParams(window.location.search);
-  if (urlParams.get('checkout') === 'success') {
-    showMessage('Payment successful — your plan is now active!');
-    history.replaceState({}, '', '/');
-  } else if (urlParams.get('checkout') === 'cancelled') {
-    showMessage('Checkout cancelled — no charge was made.', true);
-    history.replaceState({}, '', '/');
+  // (Listing-specific inputs removed from the UI)
+
+  // User menu functionality
+  const userMenuBtn = document.getElementById('user-menu-btn');
+  const userDropdown = document.getElementById('user-dropdown');
+  
+  if (userMenuBtn && userDropdown) {
+    userMenuBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      userDropdown.classList.toggle('hidden');
+    });
+
+    // Close dropdown when clicking outside
+    document.addEventListener('click', (e) => {
+      if (!userMenuBtn.contains(e.target) && !userDropdown.contains(e.target)) {
+        userDropdown.classList.add('hidden');
+      }
+    });
   }
 
   // Pagination controls (only wire if elements exist)
@@ -923,6 +909,12 @@ function init() {
   safeOn('#confirm-cancel', () => closeConfirm(false));
   safeOn('#confirm-ok',     () => closeConfirm(true));
 
+  // Alert-created confirmation modal controls
+  safeOn('#btn-alert-created-notnow', () => { const m = $('#alert-created-modal'); if (m) m.classList.add('hidden'); });
+  safeOn('#btn-upgrade-now', () => { window.location.href = '/billing.html'; });
+  safeOn('#alert-created-close', () => { const m = $('#alert-created-modal'); if (m) m.classList.add('hidden'); });
+  const _acBackdrop = $('#alert-created-backdrop'); if (_acBackdrop) _acBackdrop.addEventListener('click', () => { const m = $('#alert-created-modal'); if (m) m.classList.add('hidden'); });
+
   showLoggedInState();
   loadNotifications();
 }
@@ -939,6 +931,60 @@ function closeConfirm(result) {
   const modal = $('#confirm-modal');
   modal.classList.add('hidden');
   if (_confirmResolve) { _confirmResolve(result); _confirmResolve = null; }
+}
+
+// Show the "alert created" confirmation modal after creating a URL alert.
+function showAlertCreatedModal() {
+  const modal = $('#alert-created-modal');
+  if (!modal) return;
+
+  // Hide the upgrade CTA if the current user is already premium
+  try {
+    const token = localStorage.getItem('token');
+    const payload = token ? decodeJwt(token) : null;
+    const upgradeBtn = $('#btn-upgrade-now');
+    if (upgradeBtn) {
+      if (payload && payload.subscription_tier === 'premium') upgradeBtn.classList.add('hidden');
+      else upgradeBtn.classList.remove('hidden');
+    }
+  } catch (e) { /* ignore */ }
+
+  modal.classList.remove('hidden');
+}
+
+// Show the limit/upgrade modal to Free/Basic users when they try to add >1 search
+function showLimitModal() {
+  const modal = $('#limit-modal');
+  if (!modal) return;
+  modal.classList.remove('hidden');
+  // wire backdrop/close (assign handlers to avoid stacking listeners)
+  if ($('#limit-close')) $('#limit-close').onclick = () => modal.classList.add('hidden');
+  if ($('#limit-backdrop')) $('#limit-backdrop').onclick = () => modal.classList.add('hidden');
+  // upgrade button navigates to billing
+  if ($('#btn-limit-upgrade')) $('#btn-limit-upgrade').onclick = () => { window.location.href = '/billing.html'; };
+  if ($('#btn-limit-cancel')) $('#btn-limit-cancel').onclick = () => modal.classList.add('hidden');
+}
+
+// Returns true if user CAN create another search alert. If false, shows limit modal.
+async function ensureCanCreateSearchAlert() {
+  try {
+    const token = localStorage.getItem('token');
+    const payload = token ? decodeJwt(token) : null;
+    if (payload && payload.subscription_tier === 'premium') return true;
+
+    // For free/basic tiers, fetch current alerts and count active search alerts
+    const res = await apiRequest('GET', '/api/alerts');
+    const alerts = res.alerts || [];
+    const activeSearchCount = alerts.filter(a => a.alert_type === 'search' && a.is_active).length;
+    if (activeSearchCount >= 1) {
+      showLimitModal();
+      return false;
+    }
+    return true;
+  } catch (err) {
+    // If anything goes wrong, fall back to server-side enforcement
+    return true;
+  }
 }
 
 // Modal: fetch and render listing details + calendar
@@ -980,26 +1026,12 @@ async function showListingModal(listingId) {
       <div style="margin-bottom:12px">${listing.description || ''}</div>
       <div>${amenHtml}</div>
       <div style="margin-top:12px;display:flex;gap:8px">
-        <button id="modal-save-alert">Save as alert</button>
         <button id="modal-check-calendar" class="secondary">Check calendar</button>
       </div>
       <pre id="modal-calendar-output" style="margin-top:12px;white-space:pre-wrap;background:rgba(255,255,255,0.02);padding:8px;border-radius:6px;display:none"></pre>
     `;
 
-    $('#modal-save-alert').onclick = async () => {
-      const ok = await confirmAction('Save this listing as an alert?');
-      if (!ok) return;
-      try {
-        const btn = $('#modal-save-alert');
-        setBtnLoading(btn, true, 'Saving...');
-        await apiRequest('POST', '/api/alerts/listing', { listing_id: listingId, listing_url: listing.url || '' });
-        showMessage('Listing saved as alert');
-        loadAlerts();
-      } catch (err) {
-        showMessage(err.error || JSON.stringify(err), true);
-      }
-      finally { setBtnLoading($('#modal-save-alert'), false); }
-    };
+    // ("Save as alert" removed from listing modal)
 
     $('#modal-check-calendar').onclick = async () => {
       const btn = $('#modal-check-calendar');
@@ -1048,6 +1080,36 @@ async function showListingModal(listingId) {
 
   $('#modal-close').onclick = () => { modal.classList.add('hidden'); document.removeEventListener('keydown', onKey); };
   $('#modal-backdrop').onclick = () => { modal.classList.add('hidden'); document.removeEventListener('keydown', onKey); };
+}
+
+// Show modal with the exact search URL the user saved
+function showSearchModal(url) {
+  try {
+    const modal = $('#search-modal');
+    const display = $('#search-url-display');
+    if (!modal || !display) return showMessage(url || 'No URL', true);
+    display.textContent = url;
+    modal.classList.remove('hidden');
+
+    const onClose = () => { modal.classList.add('hidden'); document.removeEventListener('keydown', onKey); };
+    const onKey = (ev) => { if (ev.key === 'Escape') onClose(); };
+
+    $('#search-modal-close').onclick = onClose;
+    $('#search-backdrop').onclick = onClose;
+    document.addEventListener('keydown', onKey);
+
+    $('#search-open').onclick = () => { window.open(url, '_blank'); };
+    $('#search-copy').onclick = async () => {
+      try {
+        await navigator.clipboard.writeText(url);
+        showMessage('Link copied to clipboard');
+      } catch (e) {
+        showMessage('Could not copy link', true);
+      }
+    };
+  } catch (e) {
+    showMessage('Failed to show search URL', true);
+  }
 }
 
 async function previewSearch() {

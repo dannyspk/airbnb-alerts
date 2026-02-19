@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Plan & Billing — Airbnb Alerts</title>
+    <link rel="stylesheet" href="/styles.css">
+  </head>
+  <body>
+    <div class="container">
+      <header>
+        <h1>Airbnb Alerts</h1>
+        <div id="auth-area">
+          <a href="/" class="secondary">← Back to Dashboard</a>
+          <button id="btn-logout" class="secondary">Sign out</button>
+        </div>
+      </header>
+
+      <main>
+        <!-- ── Subscription / plan card ─────────────────────────────────── -->
+        <section class="card" id="subscription-card">
+          <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px">
+            <div>
+              <h2 style="margin:0 0 4px">Your plan</h2>
+              <div id="plan-summary" class="note">Loading…</div>
+            </div>
+            <div style="display:flex;gap:8px;flex-wrap:wrap">
+              <button id="btn-upgrade" class="primary">Upgrade plan</button>
+              <button id="btn-manage-billing" class="secondary">Manage billing</button>
+            </div>
+          </div>
+
+          <!-- Inline plan picker (revealed when upgrade clicked) -->
+          <div id="upgrade-panel" class="hidden" style="margin-top:20px">
+            <h3 style="margin:0 0 14px">Choose a plan</h3>
+            <div id="plan-cards" style="display:flex;flex-direction:column;gap:12px;max-width:560px"></div>
+            <div style="margin-top:16px;display:flex;gap:8px">
+              <button id="btn-confirm-upgrade" class="primary" disabled>Continue to payment →</button>
+              <button id="btn-cancel-upgrade" class="secondary">Cancel</button>
+            </div>
+          </div>
+        </section>
+
+        <div id="message" class="message hidden"></div>
+      </main>
+
+      <footer>
+        <small style="color:var(--muted)">Airbnb Alerts</small>
+      </footer>
+    </div>
+
+    <script src="/billing.js"></script>
+  </body>
+</html>

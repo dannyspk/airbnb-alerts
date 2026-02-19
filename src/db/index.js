@@ -10,10 +10,40 @@ dotenv.config();
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
+if (!process.env.DATABASE_URL) {
+  console.error('❌ DATABASE_URL environment variable is not set. Please link a PostgreSQL database.');
+  process.exit(1);
+}
+
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
   ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false
 });
+
+/**
+ * Wait for the database to accept connections, retrying up to `maxRetries` times
+ * with exponential back-off. Useful on platforms like Railway where the Postgres
+ * service may still be starting when the app container boots.
+ */
+export async function waitForDb(maxRetries = 10, initialDelayMs = 1000) {
+  let delay = initialDelayMs;
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      const client = await pool.connect();
+      await client.query('SELECT 1');
+      client.release();
+      console.log('✅ Database connection established');
+      return;
+    } catch (err) {
+      if (attempt === maxRetries) {
+        throw new Error(`Could not connect to database after ${maxRetries} attempts: ${err.message}`);
+      }
+      console.warn(`⏳ Database not ready (attempt ${attempt}/${maxRetries}), retrying in ${delay}ms…`);
+      await new Promise((resolve) => setTimeout(resolve, delay));
+      delay = Math.min(delay * 2, 10000); // cap at 10 s
+    }
+  }
+}
 
 export const query = (text, params) => pool.query(text, params);
 
