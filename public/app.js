@@ -1,12 +1,13 @@
 const $ = (sel) => document.querySelector(sel);
 
 function apiRequest(method, path, body) {
-  const token = localStorage.getItem('token');
+  // Support both new (accessToken) and old (token) formats
+  const accessToken = localStorage.getItem('accessToken') || localStorage.getItem('token');
   return fetch(path, {
     method,
     headers: {
       'Content-Type': 'application/json',
-      ...(token ? { Authorization: `Bearer ${token}` } : {})
+      ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {})
     },
     body: body ? JSON.stringify(body) : undefined,
     credentials: 'same-origin'
@@ -19,11 +20,12 @@ function apiRequest(method, path, body) {
       try {
         const refreshRes = await fetch('/api/auth/refresh', { method: 'POST', credentials: 'same-origin' });
         const refreshJson = await refreshRes.json().catch(() => ({}));
-        if (refreshRes.ok && refreshJson.token) {
-          localStorage.setItem('token', refreshJson.token);
+        if (refreshRes.ok && (refreshJson.accessToken || refreshJson.token)) {
+          const newToken = refreshJson.accessToken || refreshJson.token;
+          localStorage.setItem('accessToken', newToken);
           // ensure we proactively schedule the next refresh
           try { scheduleTokenRefresh(); } catch (e) { /* ignore */ }
-          const retryHeaders = Object.assign({}, { 'Content-Type': 'application/json' }, { Authorization: `Bearer ${refreshJson.token}` });
+          const retryHeaders = Object.assign({}, { 'Content-Type': 'application/json' }, { Authorization: `Bearer ${newToken}` });
           const retry = await fetch(path, { method, headers: retryHeaders, body: body ? JSON.stringify(body) : undefined, credentials: 'same-origin' });
           const retryJson = await retry.json().catch(() => ({}));
           if (retry.ok) return retryJson;
@@ -99,7 +101,7 @@ async function refreshAccessTokenSilently() {
 
 function scheduleTokenRefresh() {
   if (_refreshTimer) { clearTimeout(_refreshTimer); _refreshTimer = null; }
-  const token = localStorage.getItem('token');
+  const token = localStorage.getItem('accessToken') || localStorage.getItem('token');
   if (!token) return;
   const payload = decodeJwt(token);
   if (!payload || !payload.exp) return;
@@ -155,6 +157,9 @@ function handleLogout() {
   // notify server to revoke refresh token cookie
   apiRequest('POST', '/api/auth/logout').catch(() => {});
   localStorage.removeItem('token');
+  localStorage.removeItem('accessToken');
+  localStorage.removeItem('refreshToken');
+  localStorage.removeItem('userId');
   if (_refreshTimer) { clearTimeout(_refreshTimer); _refreshTimer = null; }
   // Clear locally persisted preview state on logout for privacy
   localStorage.removeItem('lastPreview');
@@ -843,8 +848,8 @@ async function showLoggedInState() {
 }
 
 function init() {
-  // Redirect to auth page if not signed in
-  const token = localStorage.getItem('token');
+  // Redirect to auth page if not signed in (support both old 'token' and new 'accessToken' formats)
+  const token = localStorage.getItem('accessToken') || localStorage.getItem('token');
   if (!token) return window.location.href = '/auth.html';
 
   // Schedule silent refresh for the existing token

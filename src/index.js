@@ -1,11 +1,16 @@
 import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
+import session from 'express-session';
+import ConnectPgSimple from 'connect-pg-simple';
 import dotenv from 'dotenv';
 import logger from './utils/logger.js';
 import { auditContext } from './utils/auditLog.js';
+import { configurePassport } from './middleware/passport.js';
+import passport from 'passport';
 import { startScheduler } from './scheduler/index.js';
-import { migrate, waitForDb } from './db/index.js';
+import { waitForDb } from './db/index.js';
+import pool from './db/index.js';
 
 // Routes
 import authRoutes from './routes/auth.js';
@@ -26,6 +31,33 @@ app.use(express.urlencoded({ extended: true }));
 
 // Attach audit context to all requests
 app.use(auditContext());
+
+// Session configuration (required for Passport.js)
+const PgSession = ConnectPgSimple(session);
+app.use(
+  session({
+    store: new PgSession({
+      pool: pool,
+      tableName: 'session',
+      createTableIfMissing: true,
+      errorLog: (err) => logger.error('Session store error:', err),
+    }),
+    secret: process.env.SESSION_SECRET || 'change-this-in-production',
+    resave: false,
+    saveUninitialized: false,
+    cookie: {
+      secure: process.env.NODE_ENV === 'production', // HTTPS only in production
+      httpOnly: true,
+      maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
+      sameSite: 'lax', // CSRF protection
+    },
+  })
+);
+
+// Configure and initialize Passport.js
+configurePassport();
+app.use(passport.initialize());
+app.use(passport.session());
 
 // Enforce HTTPS in production
 if (process.env.NODE_ENV === 'production') {
@@ -82,9 +114,6 @@ async function start() {
   try {
     // Wait for Postgres to be reachable (handles Railway cold-start race condition)
     await waitForDb();
-
-    // Run schema migrations
-    await migrate();
 
     // Start scheduler
     startScheduler();

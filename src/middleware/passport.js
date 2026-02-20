@@ -5,10 +5,12 @@ import logger from '../utils/logger.js';
 
 /**
  * Configure Passport.js with Google OAuth 2.0
+ * Only configures if GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET are provided
  * Uses parameterized queries to prevent SQL injection
  * Implements secure user creation/update flow
  */
 export function configurePassport() {
+  // Always configure serialization/deserialization (needed for session management)
   // Serialize user for session
   passport.serializeUser((user, done) => {
     done(null, user.id);
@@ -30,6 +32,12 @@ export function configurePassport() {
       done(error, null);
     }
   });
+
+  // Only configure Google OAuth if credentials are available
+  if (!process.env.GOOGLE_CLIENT_ID || !process.env.GOOGLE_CLIENT_SECRET) {
+    logger.warn('⚠️  Google OAuth not configured - GOOGLE_CLIENT_ID or GOOGLE_CLIENT_SECRET not set');
+    return;
+  }
 
   // Google OAuth 2.0 Strategy
   passport.use(

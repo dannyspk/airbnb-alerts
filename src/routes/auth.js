@@ -4,11 +4,25 @@ import jwt from 'jsonwebtoken';
 import crypto from 'crypto';
 import rateLimit from 'express-rate-limit';
 import { body, validationResult } from 'express-validator';
+import passport from 'passport';
 import { query } from '../db/index.js';
 import { authenticateToken } from '../middleware/auth.js';
 import { auditAction } from '../utils/auditLog.js';
+import logger from '../utils/logger.js';
 
 const router = express.Router();
+
+// Middleware to check if Google OAuth is configured
+const googleOAuthConfigured = (req, res, next) => {
+  if (!process.env.GOOGLE_CLIENT_ID || !process.env.GOOGLE_CLIENT_SECRET) {
+    logger.warn('⚠️  Google OAuth not configured - GOOGLE_CLIENT_ID or GOOGLE_CLIENT_SECRET not set');
+    return res.status(501).json({ 
+      error: 'Google OAuth is not configured on this server',
+      message: 'Please configure GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET environment variables'
+    });
+  }
+  next();
+};
 
 // Rate limiting for login attempts (5 attempts per 15 minutes)
 const loginLimiter = rateLimit({
@@ -595,6 +609,107 @@ router.post('/change-password', authenticateToken, changePasswordLimiter, change
     }).catch(() => {});
 
     res.status(500).json({ error: 'Failed to change password' });
+  }
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// GOOGLE OAUTH 2.0 ROUTES
+// ═══════════════════════════════════════════════════════════════════════════
+
+/**
+ * Initiate Google OAuth 2.0 login flow
+ * Redirects user to Google consent screen
+ * Passport automatically handles state parameter for CSRF protection
+ */
+router.get('/google',
+  googleOAuthConfigured,
+  passport.authenticate('google', {
+    scope: ['profile', 'email'],
+    accessType: 'offline',
+    prompt: 'consent',
+  })
+);
+
+/**
+ * Google OAuth 2.0 callback
+ * Exchange authorization code for tokens and create/update user
+ * Security: Passport handles state parameter validation automatically
+ */
+router.get('/google/callback',
+  googleOAuthConfigured,
+  passport.authenticate('google', {
+    failureRedirect: '/auth.html?error=google_auth_failed',
+    session: true,
+  }),
+  async (req, res) => {
+    try {
+      const user = req.user;
+
+      // Generate access and refresh tokens for client
+      const accessToken = jwt.sign(
+        {
+          userId: user.id,
+          email: user.email,
+          subscription_tier: user.subscription_tier
+        },
+        process.env.JWT_SECRET,
+        { expiresIn: '15m' }
+      );
+
+      // Generate refresh token
+      const refreshTokenSecret = crypto.randomBytes(32).toString('hex');
+      const refreshTokenHash = await bcrypt.hash(refreshTokenSecret, 10);
+      const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+
+      await query(
+        `INSERT INTO refresh_tokens (user_id, token_hash, expires_at)
+         VALUES ($1, $2, $3)`,
+        [user.id, refreshTokenHash, expiresAt]
+      );
+
+      // Log successful Google OAuth login
+      await auditAction(req, 'LOGIN_GOOGLE', 'user', user.id, {
+        success: true,
+        method: 'google_oauth'
+      }).catch(() => {});
+
+      // Redirect to frontend with tokens in URL
+      // Frontend should extract and store these tokens securely
+      const redirectUrl = `${process.env.FRONTEND_URL || 'http://localhost:3000'}/?accessToken=${accessToken}&refreshToken=${refreshTokenSecret}&userId=${user.id}&email=${encodeURIComponent(user.email)}`;
+      res.redirect(redirectUrl);
+    } catch (error) {
+      console.error('Google OAuth callback error:', error);
+      res.redirect('/auth.html?error=callback_failed');
+    }
+  }
+);
+
+/**
+ * Logout via Google OAuth
+ * Revokes session and clears Passport session
+ */
+router.post('/google/logout', authenticateToken, async (req, res) => {
+  try {
+    const userId = req.user.userId;
+
+    // Log logout
+    await auditAction(req, 'LOGOUT_GOOGLE', 'user', userId, {
+      success: true,
+      method: 'google_oauth'
+    }).catch(() => {});
+
+    // Clear Passport session
+    req.logout((err) => {
+      if (err) {
+        console.error('Logout error:', err);
+        return res.status(500).json({ error: 'Failed to logout' });
+      }
+
+      res.json({ message: 'Logged out successfully' });
+    });
+  } catch (error) {
+    console.error('Google logout error:', error);
+    res.status(500).json({ error: 'Failed to logout' });
   }
 });
 
