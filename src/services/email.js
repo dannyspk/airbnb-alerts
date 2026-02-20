@@ -111,13 +111,13 @@ export async function sendWelcomeEmail(userEmail) {
   const mailOptions = {
     from: process.env.EMAIL_FROM,
     to: userEmail,
-    subject: 'Welcome to Airbnb Alerts!',
+    subject: 'Welcome to Alert Buzz!',
     html: `
       <!DOCTYPE html>
       <html>
       <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
         <div style="max-width: 600px; margin: 0 auto; padding: 20px;">
-          <h1 style="color: #FF5A5F;">Welcome to Airbnb Alerts! 🎉</h1>
+          <h1 style="color: #FF5A5F;">Welcome to Alert Buzz! 🎉</h1>
           <p>Thanks for signing up! You can now:</p>
           <ul>
             <li>Set up search alerts to find new listings</li>
@@ -151,7 +151,7 @@ export async function sendPasswordResetEmail(userEmail, resetUrl) {
   const mailOptions = {
     from: process.env.EMAIL_FROM,
     to: userEmail,
-    subject: 'Reset your Airbnb Alerts password',
+    subject: 'Reset your Alert Buzz password',
     html: `
       <!DOCTYPE html>
       <html>

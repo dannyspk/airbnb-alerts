@@ -2,7 +2,7 @@
 
 ## Overview
 
-This document outlines the secure implementation of Google OAuth 2.0 authentication for the Airbnb Alerts application using Passport.js.
+This document outlines the secure implementation of Google OAuth 2.0 authentication for the Alert Buzz application using Passport.js.
 
 ## Security Features Implemented
 
