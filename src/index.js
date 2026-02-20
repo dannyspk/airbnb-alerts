@@ -23,6 +23,18 @@ app.use(cors());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
+// Enforce HTTPS in production
+if (process.env.NODE_ENV === 'production') {
+  app.use((req, res, next) => {
+    // Check if connection is already HTTPS or if it's being proxied through HTTPS
+    // x-forwarded-proto is set by Railway/reverse proxies
+    if (req.header('x-forwarded-proto') !== 'https' && !req.secure) {
+      return res.redirect(301, `https://${req.header('host')}${req.url}`);
+    }
+    next();
+  });
+}
+
 // Serve static files
 app.use(express.static('public'));
 
