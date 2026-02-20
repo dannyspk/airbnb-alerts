@@ -229,9 +229,11 @@ router.post('/portal', authenticateToken, async (req, res) => {
   }
 });
 
-// ─── POST /api/billing/webhook ────────────────────────────────────────────────
-// Stripe sends events here — MUST use raw body (registered before express.json())
-router.post('/webhook', express.raw({ type: 'application/json' }), async (req, res) => {
+// ─── Stripe webhook handler ────────────────────────────────────────────────
+// Exported separately so index.js can mount it BEFORE express.json() is applied.
+// Stripe signature verification requires the raw Buffer; if express.json() runs
+// first it parses the body to an object and the signature check always fails.
+export async function stripeWebhookHandler(req, res) {
   const sig = req.headers['stripe-signature'];
   let event;
 
@@ -264,7 +266,6 @@ router.post('/webhook', express.raw({ type: 'application/json' }), async (req, r
 
       case 'customer.subscription.deleted': {
         const sub = event.data.object;
-        // Mark cancelled, downgrade tier
         await query(
           `UPDATE subscriptions SET status = 'canceled', updated_at = CURRENT_TIMESTAMP
            WHERE stripe_subscription_id = $1`,
@@ -297,7 +298,6 @@ router.post('/webhook', express.raw({ type: 'application/json' }), async (req, r
       }
 
       default:
-        // Unhandled event type — ignore
         break;
     }
 
@@ -306,6 +306,6 @@ router.post('/webhook', express.raw({ type: 'application/json' }), async (req, r
     logger.error('Webhook handler error:', err);
     res.status(500).json({ error: 'Webhook processing failed' });
   }
-});
+}
 
 export default router;

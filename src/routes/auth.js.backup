@@ -156,25 +156,6 @@ router.post('/register', registerLimiter, registerValidationRules, handleValidat
       email: user.email
     }).catch(() => {}); // Silently fail audit logging
 
-    // Set tokens as HttpOnly cookies (matching middleware/auth.js expectations)
-    const isProduction = process.env.NODE_ENV === 'production';
-    const cookieOptions = {
-      httpOnly: true,
-      secure: isProduction,
-      sameSite: isProduction ? 'lax' : 'lax',
-      path: '/',
-    };
-
-    res.cookie('access_token', tokens.accessToken, {
-      ...cookieOptions,
-      maxAge: 15 * 60 * 1000, // 15 minutes
-    });
-
-    res.cookie('refresh_token', tokens.refreshToken, {
-      ...cookieOptions,
-      maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
-    });
-
     res.status(201).json({
       message: 'User created successfully',
       accessToken: tokens.accessToken,
@@ -232,25 +213,6 @@ router.post('/login', loginLimiter, loginValidationRules, handleValidationErrors
       success: true
     }).catch(() => {});
 
-    // Set tokens as HttpOnly cookies (matching middleware/auth.js expectations)
-    const isProduction = process.env.NODE_ENV === 'production';
-    const cookieOptions = {
-      httpOnly: true,
-      secure: isProduction,
-      sameSite: isProduction ? 'lax' : 'lax',
-      path: '/',
-    };
-
-    res.cookie('access_token', tokens.accessToken, {
-      ...cookieOptions,
-      maxAge: 15 * 60 * 1000, // 15 minutes
-    });
-
-    res.cookie('refresh_token', tokens.refreshToken, {
-      ...cookieOptions,
-      maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
-    });
-
     res.json({
       message: 'Login successful',
       accessToken: tokens.accessToken,
@@ -279,11 +241,10 @@ router.post('/refresh', refreshTokenValidation, handleValidationErrors, async (r
   try {
     const { refreshToken } = req.body;
 
-    // Find valid refresh token in database
+    // Find valid refresh token in database - get all valid tokens to compare
     const tokenResult = await query(
-      `SELECT user_id FROM refresh_tokens 
-       WHERE expires_at > CURRENT_TIMESTAMP AND revoked_at IS NULL
-       LIMIT 100`,
+      `SELECT user_id, token_hash FROM refresh_tokens 
+       WHERE expires_at > CURRENT_TIMESTAMP AND revoked_at IS NULL`,
       []
     );
 
@@ -293,21 +254,12 @@ router.post('/refresh', refreshTokenValidation, handleValidationErrors, async (r
 
     // Find matching token (constant-time comparison)
     let matchedToken = null;
-    for (const record of tokenResult.rows) {
-      const tokenResult2 = await query(
-        `SELECT token_hash FROM refresh_tokens WHERE user_id = $1 
-         AND expires_at > CURRENT_TIMESTAMP AND revoked_at IS NULL`,
-        [record.user_id]
-      );
-      
-      for (const tokenRecord of tokenResult2.rows) {
-        const isValid = await bcrypt.compare(refreshToken, tokenRecord.token_hash);
-        if (isValid) {
-          matchedToken = { userId: record.user_id, tokenHash: tokenRecord.token_hash };
-          break;
-        }
+    for (const tokenRecord of tokenResult.rows) {
+      const isValid = await bcrypt.compare(refreshToken, tokenRecord.token_hash);
+      if (isValid) {
+        matchedToken = { userId: tokenRecord.user_id };
+        break;
       }
-      if (matchedToken) break;
     }
 
     if (!matchedToken) {
@@ -329,28 +281,9 @@ router.post('/refresh', refreshTokenValidation, handleValidationErrors, async (r
     // Generate new tokens
     const tokens = await generateTokens(user);
 
-    // Set tokens as HttpOnly cookies
-    const isProduction = process.env.NODE_ENV === 'production';
-    const cookieOptions = {
-      httpOnly: true,
-      secure: isProduction,
-      sameSite: isProduction ? 'lax' : 'lax',
-      path: '/',
-    };
-
-    res.cookie('access_token', tokens.accessToken, {
-      ...cookieOptions,
-      maxAge: 15 * 60 * 1000, // 15 minutes
-    });
-
-    res.cookie('refresh_token', tokens.refreshToken, {
-      ...cookieOptions,
-      maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
-    });
-
     res.json({
       message: 'Token refreshed successfully',
-      accessToken: tokens.accessToken,
+      token: tokens.accessToken,
       refreshToken: tokens.refreshToken,
       refreshTokenExpires: tokens.refreshTokenExpires
     });
@@ -695,7 +628,7 @@ router.get('/google',
 router.get('/google/callback',
   googleOAuthConfigured,
   passport.authenticate('google', {
-    failureRedirect: '/auth?error=google_auth_failed',
+    failureRedirect: '/auth.html?error=google_auth_failed',
     session: true,
   }),
   async (req, res) => {
@@ -730,32 +663,13 @@ router.get('/google/callback',
         method: 'google_oauth'
       }).catch(() => {});
 
-      // Set tokens as HttpOnly cookies instead of URL parameters.
-      // URL parameters leak into server logs, browser history, and Referer headers.
-      const isProduction = process.env.NODE_ENV === 'production';
-      const cookieOptions = {
-        httpOnly: true,
-        secure: isProduction,
-        sameSite: isProduction ? 'lax' : 'lax',
-        path: '/',
-      };
-
-      res.cookie('access_token', accessToken, {
-        ...cookieOptions,
-        maxAge: 15 * 60 * 1000, // 15 minutes
-      });
-
-      res.cookie('refresh_token', refreshTokenSecret, {
-        ...cookieOptions,
-        maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
-      });
-
-      // Redirect cleanly — no tokens in the URL
-      const redirectUrl = `${process.env.FRONTEND_URL || 'http://localhost:3000'}/`;
+      // Redirect to frontend with tokens in URL
+      // Frontend should extract and store these tokens securely
+      const redirectUrl = `${process.env.FRONTEND_URL || 'http://localhost:3000'}/?accessToken=${accessToken}&refreshToken=${refreshTokenSecret}&userId=${user.id}&email=${encodeURIComponent(user.email)}`;
       res.redirect(redirectUrl);
     } catch (error) {
       console.error('Google OAuth callback error:', error);
-      res.redirect('/auth?error=callback_failed');
+      res.redirect('/auth.html?error=callback_failed');
     }
   }
 );

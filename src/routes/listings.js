@@ -238,8 +238,17 @@ router.post('/search', authenticateToken, async (req, res) => {
   }
 });
 
+// Validate listingId is purely numeric before it touches any process or DB query.
+// Airbnb listing IDs are always integers; anything else is either a bug or an attack.
+function validateListingId(req, res, next) {
+  if (!/^\d{1,20}$/.test(req.params.listingId)) {
+    return res.status(400).json({ error: 'Invalid listing ID' });
+  }
+  next();
+}
+
 // Get live listing details (from Python)
-router.get('/details/:listingId', authenticateToken, async (req, res) => {
+router.get('/details/:listingId', authenticateToken, validateListingId, async (req, res) => {
   try {
     const { listingId } = req.params;
     const details = await getListingDetails(listingId);
@@ -251,7 +260,7 @@ router.get('/details/:listingId', authenticateToken, async (req, res) => {
 });
 
 // Get calendar/availability (live)
-router.get('/calendar/:listingId', authenticateToken, async (req, res) => {
+router.get('/calendar/:listingId', authenticateToken, validateListingId, async (req, res) => {
   try {
     const { listingId } = req.params;
     const cal = await getCalendar(listingId);
@@ -263,7 +272,7 @@ router.get('/calendar/:listingId', authenticateToken, async (req, res) => {
 });
 
 // Generic DB-backed listing lookup (kept last so it doesn't shadow other routes)
-router.get('/:listingId', authenticateToken, async (req, res) => {
+router.get('/:listingId', authenticateToken, validateListingId, async (req, res) => {
   try {
     const { listingId } = req.params;
 

@@ -1,8 +1,10 @@
 import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
+import cookieParser from 'cookie-parser';
 import session from 'express-session';
 import ConnectPgSimple from 'connect-pg-simple';
+import rateLimit from 'express-rate-limit';
 import dotenv from 'dotenv';
 import logger from './utils/logger.js';
 import { auditContext } from './utils/auditLog.js';
@@ -16,18 +18,46 @@ import pool from './db/index.js';
 import authRoutes from './routes/auth.js';
 import alertRoutes from './routes/alerts.js';
 import listingRoutes from './routes/listings.js';
-import billingRoutes from './routes/billing.js';
+import billingRoutes, { stripeWebhookHandler } from './routes/billing.js';
 
 dotenv.config();
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
+// Trust the first hop from Railway/reverse proxy so req.ip reflects the real
+// client IP rather than the proxy address. This makes rate limiters and audit
+// log IPs accurate. '1' = trust one proxy hop.
+if (process.env.NODE_ENV === 'production') app.set('trust proxy', 1);
+
+// ── Stripe webhook MUST be registered before express.json() consumes the body ──
+// Stripe signature verification requires the raw Buffer, not a parsed object.
+app.post('/api/billing/webhook', express.raw({ type: 'application/json' }), stripeWebhookHandler);
+
 // Middleware
-app.use(helmet());
-app.use(cors());
+app.use(helmet({
+  contentSecurityPolicy: {
+    directives: {
+      defaultSrc:  ["'self'"],
+      scriptSrc:   ["'self'"],
+      styleSrc:    ["'self'", "'unsafe-inline'"],
+      imgSrc:      ["'self'", 'data:', '*.airbnb.com', 'a0.muscache.com'],
+      connectSrc:  ["'self'"],
+      frameSrc:    ["'none'"],
+      objectSrc:   ["'none'"],
+      baseUri:     ["'self'"],
+    },
+  },
+}));
+
+app.use(cors({
+  origin: process.env.FRONTEND_URL || 'http://localhost:3000',
+  credentials: true,
+}));
+
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+app.use(cookieParser());
 
 // Attach audit context to all requests
 app.use(auditContext());
@@ -70,6 +100,22 @@ if (process.env.NODE_ENV === 'production') {
     next();
   });
 }
+
+// URL rewriting middleware: map clean URLs to .html files
+app.use((req, res, next) => {
+  const cleanToHtml = {
+    '/auth': '/auth.html',
+    '/settings': '/settings.html',
+    '/billing': '/billing.html',
+  };
+  
+  // If the request path matches a clean URL, rewrite to .html
+  if (cleanToHtml[req.path]) {
+    req.url = cleanToHtml[req.path];
+  }
+  
+  next();
+});
 
 // Serve static files
 app.use(express.static('public'));

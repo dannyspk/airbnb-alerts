@@ -17,7 +17,12 @@ if (!process.env.DATABASE_URL) {
 
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
-  ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false
+  // In production, enforce SSL certificate verification.
+  // Set DATABASE_SSL_REJECT_UNAUTHORIZED=false only if your provider (e.g. Railway
+  // private networking, Supabase with self-signed cert) genuinely requires it.
+  ssl: process.env.NODE_ENV === 'production'
+    ? { rejectUnauthorized: process.env.DATABASE_SSL_REJECT_UNAUTHORIZED !== 'false' }
+    : false,
 });
 
 /**

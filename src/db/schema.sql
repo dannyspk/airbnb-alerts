@@ -29,13 +29,18 @@ CREATE TABLE IF NOT EXISTS refresh_tokens (
   id SERIAL PRIMARY KEY,
   user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   token_hash VARCHAR(128) UNIQUE NOT NULL,
+  token_prefix VARCHAR(16) NOT NULL DEFAULT '',        -- first 16 chars of raw token, for indexed lookup
   expires_at TIMESTAMP NOT NULL,
   revoked_at TIMESTAMP,                                -- NULL = not revoked; set when user logs out
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
+-- Migration: add token_prefix if upgrading an existing database (safe no-op if already present)
+ALTER TABLE refresh_tokens ADD COLUMN IF NOT EXISTS token_prefix VARCHAR(16) NOT NULL DEFAULT '';
+
 CREATE INDEX IF NOT EXISTS idx_refresh_tokens_user ON refresh_tokens(user_id);
 CREATE INDEX IF NOT EXISTS idx_refresh_tokens_expires ON refresh_tokens(expires_at);
+CREATE INDEX IF NOT EXISTS idx_refresh_tokens_prefix ON refresh_tokens(token_prefix);
 
 -- Search alerts table
 CREATE TABLE IF NOT EXISTS search_alerts (
@@ -165,3 +170,4 @@ CREATE INDEX idx_listings_location ON listings(lat, lng);
 CREATE INDEX idx_search_results_search_id ON search_results(search_alert_id);
 CREATE INDEX idx_search_results_listing_id ON search_results(listing_id);
 CREATE INDEX idx_notifications_user_id ON notifications(user_id);
+CREATE INDEX idx_refresh_tokens_prefix ON refresh_tokens(token_prefix);

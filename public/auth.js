@@ -13,27 +13,22 @@ function validateEmail(v) { return typeof v === 'string' && v.includes('@') && v
 function validatePassword(v) { return typeof v === 'string' && v.length >= 8; }
 
 function switchToForm(formId) {
-  if (formId === 'auth') {
-    // Show the login/register tabs
-    document.querySelectorAll('#login-card, #register-card, #forgot-password-card, #reset-password-card').forEach(card => card.style.display = 'none');
-    switchToTab('login');
-    return;
-  }
-  // Hide all forms first
-  document.querySelectorAll('#login-card, #register-card, #forgot-password-card, #reset-password-card').forEach(card => card.style.display = 'none');
+  document.querySelectorAll('#login-card, #register-card, #forgot-password-card, #reset-password-card')
+    .forEach(card => card.style.display = 'none');
+  if (formId === 'auth') { switchToTab('login'); return; }
   const form = $(`#${formId}-card`);
   if (form) form.style.display = 'block';
 }
 
 function switchToTab(tab) {
-  const loginTab = $('#tab-login');
+  const loginTab    = $('#tab-login');
   const registerTab = $('#tab-register');
-  const loginCard = $('#login-card');
+  const loginCard   = $('#login-card');
   const registerCard = $('#register-card');
-  
-  // Hide all other forms first
-  document.querySelectorAll('#forgot-password-card, #reset-password-card').forEach(card => card.style.display = 'none');
-  
+
+  document.querySelectorAll('#forgot-password-card, #reset-password-card')
+    .forEach(card => card.style.display = 'none');
+
   if (tab === 'login') {
     loginTab.classList.add('active');
     registerTab.classList.remove('active');
@@ -56,31 +51,26 @@ function switchToTab(tab) {
 }
 
 document.addEventListener('DOMContentLoaded', () => {
-  // ===== TAB SWITCHING =====
-  const loginTab = $('#tab-login');
-  const registerTab = $('#tab-register');
-  loginTab?.addEventListener('click', () => switchToTab('login'));
-  registerTab?.addEventListener('click', () => switchToTab('register'));
+  // ── Tab switching ──────────────────────────────────────────────────────────
+  $('#tab-login')?.addEventListener('click', () => switchToTab('login'));
+  $('#tab-register')?.addEventListener('click', () => switchToTab('register'));
 
-  // ===== LOGIN FORM =====
+  // ── Login ──────────────────────────────────────────────────────────────────
   const loginEmailEl = $('#login-email');
-  const loginPassEl = $('#login-password');
-  const btnLogin = $('#btn-login');
-  const toggleLoginPassword = $('#toggle-login-password');
-  const btnForgotPassword = $('#btn-forgot-password');
+  const loginPassEl  = $('#login-password');
+  const btnLogin     = $('#btn-login');
 
-  function updateLoginButton() {
-    const ok = validateEmail(loginEmailEl.value.trim()) && validatePassword(loginPassEl.value || '');
-    if (btnLogin) btnLogin.disabled = !ok;
-  }
-
+  const updateLoginButton = () => {
+    if (btnLogin) btnLogin.disabled =
+      !(validateEmail(loginEmailEl.value.trim()) && validatePassword(loginPassEl.value || ''));
+  };
   loginEmailEl?.addEventListener('input', updateLoginButton);
   loginPassEl?.addEventListener('input', updateLoginButton);
 
-  toggleLoginPassword?.addEventListener('click', (e) => {
+  $('#toggle-login-password')?.addEventListener('click', (e) => {
     e.preventDefault();
-    if (loginPassEl.type === 'password') { loginPassEl.type = 'text'; toggleLoginPassword.textContent = 'Hide'; }
-    else { loginPassEl.type = 'password'; toggleLoginPassword.textContent = 'Show'; }
+    loginPassEl.type = loginPassEl.type === 'password' ? 'text' : 'password';
+    e.target.textContent = loginPassEl.type === 'password' ? 'Show' : 'Hide';
   });
 
   loginPassEl?.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !btnLogin.disabled) btnLogin.click(); });
@@ -88,50 +78,42 @@ document.addEventListener('DOMContentLoaded', () => {
   btnLogin?.addEventListener('click', async (e) => {
     e.preventDefault();
     try {
-      const email = loginEmailEl.value.trim().toLowerCase();
-      const password = loginPassEl.value || '';
-      const res = await fetch('/api/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email, password }), credentials: 'same-origin' });
+      const res = await fetch('/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email:    loginEmailEl.value.trim().toLowerCase(),
+          password: loginPassEl.value || '',
+        }),
+        credentials: 'same-origin',
+      });
       const json = await res.json().catch(() => ({}));
       if (!res.ok) return showMessage(json.error || 'Authentication failed', true);
-      if (json.accessToken) {
-        localStorage.setItem('accessToken', json.accessToken);
-        localStorage.setItem('refreshToken', json.refreshToken);
-        localStorage.setItem('userId', json.userId);
-        showMessage('Logged in — redirecting…');
-        setTimeout(() => { window.location.href = '/'; }, 600);
-      } else if (json.token) {
-        // backward compatibility with old token format
-        localStorage.setItem('token', json.token);
-        showMessage('Logged in — redirecting…');
-        setTimeout(() => { window.location.href = '/'; }, 600);
-      } else {
-        showMessage('Unexpected response from server', true);
-      }
-    } catch (err) {
+      showMessage('Logged in — redirecting…');
+      setTimeout(() => { window.location.href = '/'; }, 600);
+    } catch {
       showMessage('Request failed', true);
     }
   });
 
-  btnForgotPassword?.addEventListener('click', (e) => { e.preventDefault(); switchToForm('forgot-password'); });
+  $('#btn-forgot-password')?.addEventListener('click', (e) => { e.preventDefault(); switchToForm('forgot-password'); });
 
-  // ===== REGISTER FORM =====
+  // ── Register ───────────────────────────────────────────────────────────────
   const registerEmailEl = $('#register-email');
-  const registerPassEl = $('#register-password');
-  const btnRegister = $('#btn-register');
-  const toggleRegisterPassword = $('#toggle-register-password');
+  const registerPassEl  = $('#register-password');
+  const btnRegister     = $('#btn-register');
 
-  function updateRegisterButton() {
-    const ok = validateEmail(registerEmailEl.value.trim()) && validatePassword(registerPassEl.value || '');
-    if (btnRegister) btnRegister.disabled = !ok;
-  }
-
+  const updateRegisterButton = () => {
+    if (btnRegister) btnRegister.disabled =
+      !(validateEmail(registerEmailEl.value.trim()) && validatePassword(registerPassEl.value || ''));
+  };
   registerEmailEl?.addEventListener('input', updateRegisterButton);
   registerPassEl?.addEventListener('input', updateRegisterButton);
 
-  toggleRegisterPassword?.addEventListener('click', (e) => {
+  $('#toggle-register-password')?.addEventListener('click', (e) => {
     e.preventDefault();
-    if (registerPassEl.type === 'password') { registerPassEl.type = 'text'; toggleRegisterPassword.textContent = 'Hide'; }
-    else { registerPassEl.type = 'password'; toggleRegisterPassword.textContent = 'Show'; }
+    registerPassEl.type = registerPassEl.type === 'password' ? 'text' : 'password';
+    e.target.textContent = registerPassEl.type === 'password' ? 'Show' : 'Hide';
   });
 
   registerPassEl?.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !btnRegister.disabled) btnRegister.click(); });
@@ -139,161 +121,109 @@ document.addEventListener('DOMContentLoaded', () => {
   btnRegister?.addEventListener('click', async (e) => {
     e.preventDefault();
     try {
-      const email = registerEmailEl.value.trim().toLowerCase();
-      const password = registerPassEl.value || '';
-      const res = await fetch('/api/auth/register', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email, password }), credentials: 'same-origin' });
+      const res = await fetch('/api/auth/register', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email:    registerEmailEl.value.trim().toLowerCase(),
+          password: registerPassEl.value || '',
+        }),
+        credentials: 'same-origin',
+      });
       const json = await res.json().catch(() => ({}));
       if (!res.ok) return showMessage(json.error || 'Registration failed', true);
-      if (json.accessToken) {
-        localStorage.setItem('accessToken', json.accessToken);
-        localStorage.setItem('refreshToken', json.refreshToken);
-        localStorage.setItem('userId', json.userId);
-        showMessage('Registered — redirecting…');
-        setTimeout(() => { window.location.href = '/'; }, 600);
-      } else if (json.token) {
-        // backward compatibility with old token format
-        localStorage.setItem('token', json.token);
-        showMessage('Registered — redirecting…');
-        setTimeout(() => { window.location.href = '/'; }, 600);
-      } else {
-        showMessage('Unexpected response from server', true);
-      }
-    } catch (err) {
+      showMessage('Registered — redirecting…');
+      setTimeout(() => { window.location.href = '/'; }, 600);
+    } catch {
       showMessage('Request failed', true);
     }
   });
 
-  // ===== FORGOT PASSWORD FORM =====
+  // ── Forgot password ────────────────────────────────────────────────────────
   const forgotEmailEl = $('#forgot-email');
-  const btnSendReset = $('#btn-send-reset');
-  const btnBackToLogin = $('#btn-back-to-login');
+  const btnSendReset  = $('#btn-send-reset');
 
-  function updateForgotButton() {
-    const ok = validateEmail(forgotEmailEl.value.trim());
-    if (btnSendReset) btnSendReset.disabled = !ok;
-  }
-
+  const updateForgotButton = () => {
+    if (btnSendReset) btnSendReset.disabled = !validateEmail(forgotEmailEl.value.trim());
+  };
   forgotEmailEl?.addEventListener('input', updateForgotButton);
   forgotEmailEl?.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !btnSendReset.disabled) btnSendReset.click(); });
 
   btnSendReset?.addEventListener('click', async (e) => {
     e.preventDefault();
     try {
-      const email = forgotEmailEl.value.trim().toLowerCase();
       const res = await fetch('/api/auth/forgot-password', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email }),
-        credentials: 'same-origin'
+        body: JSON.stringify({ email: forgotEmailEl.value.trim().toLowerCase() }),
+        credentials: 'same-origin',
       });
       const json = await res.json().catch(() => ({}));
       if (!res.ok) return showMessage(json.error || 'Failed to send reset link', true);
-      showMessage('Reset link sent to your email. Check your inbox!');
+      showMessage('Reset link sent — check your inbox!');
       setTimeout(() => { switchToForm('auth'); forgotEmailEl.value = ''; updateForgotButton(); }, 2000);
-    } catch (err) {
+    } catch {
       showMessage('Request failed', true);
     }
   });
 
-  btnBackToLogin?.addEventListener('click', (e) => { e.preventDefault(); switchToForm('auth'); });
+  $('#btn-back-to-login')?.addEventListener('click', (e) => { e.preventDefault(); switchToForm('auth'); });
 
-  // ===== RESET PASSWORD FORM (from email link) =====
-  const resetPassEl = $('#reset-password');
+  // ── Reset password ─────────────────────────────────────────────────────────
+  const resetPassEl    = $('#reset-password');
   const resetConfirmEl = $('#reset-confirm');
-  const btnResetPassword = $('#btn-reset-password');
-  const toggleResetPassword = $('#toggle-reset-password');
-  const btnBackToLogin2 = $('#btn-back-to-login-2');
+  const btnReset       = $('#btn-reset-password');
 
-  function updateResetButton() {
-    const pass = resetPassEl.value || '';
-    const confirm = resetConfirmEl.value || '';
-    const ok = validatePassword(pass) && pass === confirm;
-    if (btnResetPassword) btnResetPassword.disabled = !ok;
-  }
-
+  const updateResetButton = () => {
+    const p = resetPassEl?.value || '';
+    if (btnReset) btnReset.disabled = !(validatePassword(p) && p === (resetConfirmEl?.value || ''));
+  };
   resetPassEl?.addEventListener('input', updateResetButton);
   resetConfirmEl?.addEventListener('input', updateResetButton);
-  resetConfirmEl?.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !btnResetPassword.disabled) btnResetPassword.click(); });
+  resetConfirmEl?.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !btnReset.disabled) btnReset.click(); });
 
-  toggleResetPassword?.addEventListener('click', (e) => {
+  $('#toggle-reset-password')?.addEventListener('click', (e) => {
     e.preventDefault();
-    if (resetPassEl.type === 'password') {
-      resetPassEl.type = 'text';
-      resetConfirmEl.type = 'text';
-      toggleResetPassword.textContent = 'Hide';
-    } else {
-      resetPassEl.type = 'password';
-      resetConfirmEl.type = 'password';
-      toggleResetPassword.textContent = 'Show';
-    }
+    const type = resetPassEl.type === 'password' ? 'text' : 'password';
+    resetPassEl.type = resetConfirmEl.type = type;
+    e.target.textContent = type === 'password' ? 'Show' : 'Hide';
   });
 
-  btnResetPassword?.addEventListener('click', async (e) => {
+  btnReset?.addEventListener('click', async (e) => {
     e.preventDefault();
+    const token = new URLSearchParams(window.location.search).get('reset_token');
+    if (!token) return showMessage('Invalid reset link', true);
     try {
-      const token = new URLSearchParams(window.location.search).get('reset_token');
-      if (!token) return showMessage('Invalid reset link', true);
-
-      const password = resetPassEl.value;
       const res = await fetch('/api/auth/reset-password', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ token, password }),
-        credentials: 'same-origin'
+        body: JSON.stringify({ token, newPassword: resetPassEl.value }),
+        credentials: 'same-origin',
       });
       const json = await res.json().catch(() => ({}));
       if (!res.ok) return showMessage(json.error || 'Failed to reset password', true);
-      showMessage('Password reset successfully! Redirecting to login...');
+      showMessage('Password reset — redirecting to login…');
       setTimeout(() => { window.location.href = '/auth.html'; }, 2000);
-    } catch (err) {
+    } catch {
       showMessage('Request failed', true);
     }
   });
 
-  btnBackToLogin2?.addEventListener('click', (e) => { e.preventDefault(); switchToForm('auth'); });
+  $('#btn-back-to-login-2')?.addEventListener('click', (e) => { e.preventDefault(); switchToForm('auth'); });
 
-  // ===== GOOGLE OAUTH =====
-  const btnGoogleLogin = $('#btn-google-login');
-  const btnGoogleRegister = $('#btn-google-register');
-  btnGoogleLogin?.addEventListener('click', (e) => {
-    e.preventDefault();
-    // Redirect to Google OAuth endpoint
-    window.location.href = '/api/auth/google';
-  });
-  btnGoogleRegister?.addEventListener('click', (e) => {
-    e.preventDefault();
-    // Redirect to Google OAuth endpoint (same endpoint for both login and register)
-    window.location.href = '/api/auth/google';
-  });
+  // ── Google OAuth ───────────────────────────────────────────────────────────
+  $('#btn-google-login')?.addEventListener('click',    (e) => { e.preventDefault(); window.location.href = '/api/auth/google'; });
+  $('#btn-google-register')?.addEventListener('click', (e) => { e.preventDefault(); window.location.href = '/api/auth/google'; });
 
-  // Check if we're returning from Google OAuth callback
+  // ── Init ───────────────────────────────────────────────────────────────────
   const params = new URLSearchParams(window.location.search);
-  if (params.has('accessToken')) {
-    const accessToken = params.get('accessToken');
-    const refreshToken = params.get('refreshToken');
-    const userId = params.get('userId');
-    if (accessToken && refreshToken) {
-      localStorage.setItem('accessToken', accessToken);
-      localStorage.setItem('refreshToken', refreshToken);
-      localStorage.setItem('userId', userId);
-      showMessage('Logged in with Google — redirecting…');
-      // Clean up URL
-      window.history.replaceState({}, document.title, '/auth.html');
-      setTimeout(() => { window.location.href = '/'; }, 600);
-    }
-  }
-
-  // Check if we need to show the reset password form
   if (params.has('reset_token')) {
     switchToForm('reset-password');
   } else {
-    // Default to login tab
     switchToTab('login');
   }
 
-  // initialize state
   updateLoginButton();
   updateRegisterButton();
   updateForgotButton();
 });
-

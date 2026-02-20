@@ -136,14 +136,15 @@ router.post('/url', authenticateToken, async (req, res) => {
       });
     }
 
-    // Parse the URL to extract parameters
+    // Parse the URL and verify it is an Airbnb domain
     let urlParams;
     try {
       urlParams = new URL(search_url);
     } catch (e) {
-      return res.status(400).json({ 
-        error: 'Invalid URL format' 
-      });
+      return res.status(400).json({ error: 'Invalid URL format' });
+    }
+    if (!urlParams.hostname.endsWith('airbnb.com')) {
+      return res.status(400).json({ error: 'URL must be from airbnb.com' });
     }
 
     // Check if user already has an active free trial alert and count current alerts in one query
