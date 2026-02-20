@@ -24,6 +24,19 @@ CREATE TABLE IF NOT EXISTS password_reset_tokens (
 
 CREATE INDEX IF NOT EXISTS idx_password_reset_user ON password_reset_tokens(user_id);
 
+-- Refresh tokens (for token rotation)
+CREATE TABLE IF NOT EXISTS refresh_tokens (
+  id SERIAL PRIMARY KEY,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  token_hash VARCHAR(128) UNIQUE NOT NULL,
+  expires_at TIMESTAMP NOT NULL,
+  revoked_at TIMESTAMP,                                -- NULL = not revoked; set when user logs out
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_refresh_tokens_user ON refresh_tokens(user_id);
+CREATE INDEX IF NOT EXISTS idx_refresh_tokens_expires ON refresh_tokens(expires_at);
+
 -- Search alerts table
 CREATE TABLE IF NOT EXISTS search_alerts (
   id SERIAL PRIMARY KEY,
@@ -123,6 +136,25 @@ CREATE TABLE IF NOT EXISTS notifications (
   email_sent BOOLEAN DEFAULT FALSE,
   email_error TEXT
 );
+
+-- Audit logs for tracking sensitive operations
+CREATE TABLE IF NOT EXISTS audit_logs (
+  id SERIAL PRIMARY KEY,
+  user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+  action VARCHAR(50) NOT NULL,
+  resource VARCHAR(100),
+  resource_id INTEGER,
+  details JSONB,
+  ip_address VARCHAR(45),
+  user_agent TEXT,
+  status VARCHAR(20) DEFAULT 'success' CHECK (status IN ('success', 'failure')),
+  error_message TEXT,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_audit_user ON audit_logs(user_id);
+CREATE INDEX IF NOT EXISTS idx_audit_action ON audit_logs(action);
+CREATE INDEX IF NOT EXISTS idx_audit_created ON audit_logs(created_at);
 
 -- Indexes for performance
 CREATE INDEX idx_users_email ON users(email);

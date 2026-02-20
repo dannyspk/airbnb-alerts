@@ -3,6 +3,7 @@ import cors from 'cors';
 import helmet from 'helmet';
 import dotenv from 'dotenv';
 import logger from './utils/logger.js';
+import { auditContext } from './utils/auditLog.js';
 import { startScheduler } from './scheduler/index.js';
 import { migrate, waitForDb } from './db/index.js';
 
@@ -22,6 +23,9 @@ app.use(helmet());
 app.use(cors());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+
+// Attach audit context to all requests
+app.use(auditContext());
 
 // Enforce HTTPS in production
 if (process.env.NODE_ENV === 'production') {
