@@ -37,8 +37,8 @@ export function startScheduler() {
     }
   });
 
-  // Check premium tier alerts (every 15 minutes)
-  cron.schedule('*/15 * * * *', async () => {
+  // Check premium tier alerts (every 1 hour)
+  cron.schedule('0 * * * *', async () => {
     logger.info('Running premium tier scraping...');
     
     try {

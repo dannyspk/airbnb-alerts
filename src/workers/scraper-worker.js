@@ -246,17 +246,43 @@ export async function runSearchAlert(alertId, opts = {}) {
 
   // ── Send emails ────────────────────────────────────────────────────────────
   const userResult = await query(
-    `SELECT u.email FROM users u
+    `SELECT u.email, u.subscription_tier FROM users u
      JOIN search_alerts sa ON sa.user_id = u.id
      WHERE sa.id = $1`,
     [alertId]
   );
   const userEmail = userResult.rows[0]?.email;
+  const subscriptionTier = userResult.rows[0]?.subscription_tier;
 
   if (userEmail) {
-    await sendAlerts(userEmail, alert, alertId, newListings,       'new',        'new_listing',       sendEmailFn);
-    await sendAlerts(userEmail, alert, alertId, priceDropListings, 'price_drop', 'price_drop',        sendEmailFn);
-    await sendAlerts(userEmail, alert, alertId, freedUpListings,   'availability','availability_change', sendEmailFn);
+    // Premium tier: only email if new listings found (avoid email spam from hourly runs)
+    // Basic tier: email for all changes (new, price drops, freed up) but max 1 email per 24 hours
+    if (subscriptionTier === 'premium') {
+      // Premium: only send if there are NEW listings
+      await sendAlerts(userEmail, alert, alertId, newListings, 'new', 'new_listing', sendEmailFn);
+    } else {
+      // Basic: send all changes, but check if we've already sent an email in the last 24 hours
+      const lastEmailCheck = await query(
+        `SELECT last_notified FROM search_alerts WHERE id = $1`,
+        [alertId]
+      );
+      
+      const lastNotified = lastEmailCheck.rows[0]?.last_notified;
+      const hasEmailedRecently = lastNotified && (new Date() - new Date(lastNotified)) < 24 * 60 * 60 * 1000;
+      
+      if (!hasEmailedRecently) {
+        // Send email only if we haven't sent one in the last 24 hours
+        const hasChanges = newListings.length > 0 || priceDropListings.length > 0 || freedUpListings.length > 0;
+        
+        if (hasChanges) {
+          await sendAlerts(userEmail, alert, alertId, newListings,       'new',        'new_listing',       sendEmailFn);
+          await sendAlerts(userEmail, alert, alertId, priceDropListings, 'price_drop', 'price_drop',        sendEmailFn);
+          await sendAlerts(userEmail, alert, alertId, freedUpListings,   'availability','availability_change', sendEmailFn);
+        }
+      } else {
+        logger.info(`Alert ${alertId} (basic tier): skipping email — sent one within last 24 hours`);
+      }
+    }
   }
 
   logger.info(
