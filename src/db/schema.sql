@@ -122,6 +122,11 @@ CREATE TABLE IF NOT EXISTS search_results (
 );
 
 -- Extra columns added post-launch (safe to run on existing DBs)
+ALTER TABLE users ADD COLUMN IF NOT EXISTS stripe_customer_id VARCHAR(255);
+ALTER TABLE users ADD COLUMN IF NOT EXISTS stripe_subscription_id VARCHAR(255);
+ALTER TABLE users ADD COLUMN IF NOT EXISTS stripe_price_id VARCHAR(255);
+ALTER TABLE users ADD COLUMN IF NOT EXISTS subscription_period_end TIMESTAMP;
+
 ALTER TABLE search_alerts ADD COLUMN IF NOT EXISTS search_url TEXT;
 ALTER TABLE search_alerts ADD COLUMN IF NOT EXISTS url_params JSONB;
 ALTER TABLE search_alerts ADD COLUMN IF NOT EXISTS instant_book BOOLEAN DEFAULT FALSE;
@@ -129,6 +134,18 @@ ALTER TABLE search_alerts ADD COLUMN IF NOT EXISTS guest_favorite BOOLEAN DEFAUL
 ALTER TABLE search_alerts ADD COLUMN IF NOT EXISTS min_beds INTEGER;
 ALTER TABLE search_alerts ADD COLUMN IF NOT EXISTS infants INTEGER;
 ALTER TABLE search_alerts ADD COLUMN IF NOT EXISTS monthly_search BOOLEAN DEFAULT FALSE;
+
+-- Price history (append-only, one row per scrape run per listing per alert)
+CREATE TABLE IF NOT EXISTS listing_price_history (
+  id SERIAL PRIMARY KEY,
+  listing_id VARCHAR(100) REFERENCES listings(listing_id) ON DELETE CASCADE,
+  search_alert_id INTEGER REFERENCES search_alerts(id) ON DELETE CASCADE,
+  price DECIMAL(10, 2) NOT NULL,
+  recorded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_price_history_listing ON listing_price_history(listing_id, recorded_at);
+CREATE INDEX IF NOT EXISTS idx_price_history_alert  ON listing_price_history(search_alert_id, recorded_at);
 
 -- Notifications log
 CREATE TABLE IF NOT EXISTS notifications (
@@ -162,12 +179,12 @@ CREATE INDEX IF NOT EXISTS idx_audit_action ON audit_logs(action);
 CREATE INDEX IF NOT EXISTS idx_audit_created ON audit_logs(created_at);
 
 -- Indexes for performance
-CREATE INDEX idx_users_email ON users(email);
-CREATE INDEX idx_search_alerts_user_id ON search_alerts(user_id);
-CREATE INDEX idx_search_alerts_active ON search_alerts(is_active);
-CREATE INDEX idx_listings_listing_id ON listings(listing_id);
-CREATE INDEX idx_listings_location ON listings(lat, lng);
-CREATE INDEX idx_search_results_search_id ON search_results(search_alert_id);
-CREATE INDEX idx_search_results_listing_id ON search_results(listing_id);
-CREATE INDEX idx_notifications_user_id ON notifications(user_id);
-CREATE INDEX idx_refresh_tokens_prefix ON refresh_tokens(token_prefix);
+CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
+CREATE INDEX IF NOT EXISTS idx_search_alerts_user_id ON search_alerts(user_id);
+CREATE INDEX IF NOT EXISTS idx_search_alerts_active ON search_alerts(is_active);
+CREATE INDEX IF NOT EXISTS idx_listings_listing_id ON listings(listing_id);
+CREATE INDEX IF NOT EXISTS idx_listings_location ON listings(lat, lng);
+CREATE INDEX IF NOT EXISTS idx_search_results_search_id ON search_results(search_alert_id);
+CREATE INDEX IF NOT EXISTS idx_search_results_listing_id ON search_results(listing_id);
+CREATE INDEX IF NOT EXISTS idx_notifications_user_id ON notifications(user_id);
+CREATE INDEX IF NOT EXISTS idx_refresh_tokens_prefix ON refresh_tokens(token_prefix);

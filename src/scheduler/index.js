@@ -97,6 +97,21 @@ export function startScheduler() {
     }
   });
 
+  // Clean up old price history (weekly on Sunday at 2:30 AM)
+  // Keep only 90 days — enough to show meaningful trends without unbounded growth
+  cron.schedule('30 2 * * 0', async () => {
+    logger.info('Cleaning up old price history...');
+    try {
+      const result = await query(
+        `DELETE FROM listing_price_history
+         WHERE recorded_at < NOW() - INTERVAL '90 days'`
+      );
+      logger.info(`Cleaned up ${result.rowCount} old price history rows`);
+    } catch (error) {
+      logger.error('Price history cleanup error:', error);
+    }
+  });
+
   // Deactivate expired free trial alerts (every hour)
   cron.schedule('0 * * * *', async () => {
     logger.info('Checking for expired free trial alerts...');
@@ -121,7 +136,7 @@ export function startScheduler() {
 
   logger.info('✅ Scheduler started');
   logger.info('📅 Basic tier: Daily at 9 AM');
-  logger.info('📅 Premium tier: Every 15 minutes');
+  logger.info('📅 Premium tier: Every hour');
   logger.info('🧹 Cleanup: Daily at 3 AM, weekly on Sunday at 2 AM');
 }
 

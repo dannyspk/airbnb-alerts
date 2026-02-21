@@ -654,12 +654,21 @@ async function loadNotifications() {
       container.innerHTML = '<i>No notifications yet</i>';
       return;
     }
-    container.innerHTML = res.notifications.map(n => `
-      <div class="alert-item">
-        <div><strong>${n.notification_type}</strong> — ${n.listing_name || n.listing_id || ''}</div>
-        <div style="color:rgba(255,255,255,0.6)">${new Date(n.sent_at).toLocaleString()}</div>
-      </div>
-    `).join('');
+    container.innerHTML = res.notifications.map(n => {
+      const isPriceDrop = n.notification_type === 'price_drop';
+      const priceChange = (isPriceDrop && n.old_price && n.new_price)
+        ? `<span style="color:#48bb78;margin-left:8px">&#x25bc; ${(n.old_price - n.new_price).toFixed(0)} (${Number(n.old_price).toFixed(0)} → ${Number(n.new_price).toFixed(0)})</span>`
+        : '';
+      return `
+        <div class="alert-item">
+          <div>
+            <strong>${n.notification_type.replace('_', ' ')}</strong>
+            — ${n.listing_name || n.listing_id || ''}
+            ${priceChange}
+          </div>
+          <div style="color:rgba(255,255,255,0.6)">${new Date(n.sent_at).toLocaleString()}</div>
+        </div>`;
+    }).join('');
   } catch (err) {
     console.error(err);
   }
@@ -731,6 +740,103 @@ async function showLoggedInState() {
   // Reveal alerts card always — loadAlerts fills it
   document.getElementById('alerts-card').classList.remove('hidden');
   document.getElementById('notifications-card').classList.remove('hidden');
+
+  // Load billing summary for paying customers
+  await loadBillingSummary();
+}
+
+// ── Billing summary on dashboard ─────────────────────────────────────────────
+async function loadBillingSummary() {
+  const card = document.getElementById('billing-summary-card');
+  const content = document.getElementById('billing-summary-content');
+  if (!card || !content) return;
+
+  try {
+    const res = await apiRequest('GET', '/api/billing/summary');
+    
+    // Only show the billing summary card for paying customers
+    if (!res.isPaid) {
+      card.classList.add('hidden');
+      return;
+    }
+
+    card.classList.remove('hidden');
+    
+    const tier = res.tier || 'basic';
+    const planName = res.planName || 'Basic';
+    const alerts = res.alerts || { used: 0, max: 0 };
+    
+    // Build usage percentage
+    const usagePercent = alerts.max > 0 ? Math.min(100, Math.round((alerts.used / alerts.max) * 100)) : 0;
+    
+    // Build billing info
+    let billingDetails = '';
+    if (res.billing) {
+      const billing = res.billing;
+      const nextBilling = billing.nextBillingDate 
+        ? `<div class="detail-item">
+            <div class="detail-label">Next billing date</div>
+            <div class="detail-value">${billing.nextBillingDate}</div>
+          </div>`
+        : '';
+      const amount = billing.amount ? `<div class="detail-item">
+            <div class="detail-label">${billing.interval === 'yearly' ? 'Annual' : 'Monthly'} cost</div>
+            <div class="detail-value">$${billing.amount.toFixed(2)}/${billing.interval === 'yearly' ? 'yr' : 'mo'}</div>
+          </div>` : '';
+      
+      billingDetails = `
+        <div class="billing-details">
+          ${amount}
+          ${nextBilling}
+          ${billing.status && billing.status !== 'active' 
+            ? `<div class="detail-item" style="border-color:var(--danger)">
+                <div class="detail-label">Status</div>
+                <div class="detail-value" style="color:var(--danger)">${billing.status}</div>
+              </div>`
+            : ''
+          }
+        </div>
+      `;
+    }
+    
+    content.innerHTML = `
+      <div class="billing-header">
+        <span class="plan-badge ${tier}">${planName}</span>
+        <span class="alert-count">
+          ${alerts.used} / ${alerts.max} active searches
+        </span>
+      </div>
+      
+      ${billingDetails}
+      
+      <div class="usage-bar">
+        <div class="usage-fill" style="width:${usagePercent}%"></div>
+      </div>
+      <div class="usage-text">${alerts.used} of ${alerts.max} searches used</div>
+      
+      <div class="billing-actions">
+        <button id="btn-manage-billing-dashboard" class="secondary">Manage billing</button>
+        <a href="/billing" class="secondary" style="text-decoration:none;display:inline-block;padding:8px 12px;border-radius:8px;border:1px solid rgba(16,24,40,0.06);font-size:14px">View full details</a>
+      </div>
+    `;
+    
+    // Wire up manage billing button
+    const manageBtn = document.getElementById('btn-manage-billing-dashboard');
+    if (manageBtn) {
+      manageBtn.onclick = async () => {
+        try {
+          const res = await apiRequest('POST', '/api/billing/portal');
+          if (res.url) window.location.href = res.url;
+        } catch (err) {
+          showMessage(err.error || 'Failed to open billing portal', true);
+        }
+      };
+    }
+    
+  } catch (err) {
+    console.error('Failed to load billing summary:', err);
+    content.innerHTML = '<div style="color:var(--danger)">Failed to load billing information</div>';
+  }
 }
 
 function init() {
@@ -899,6 +1005,34 @@ async function showListingModal(listingId) {
     `;
 
     // ("Save as alert" removed from listing modal)
+
+    // Load price history if we have an alertId in context
+    const activeAlertId = $('#listings-for-id')?.textContent?.trim();
+    if (activeAlertId && listingId) {
+      try {
+        const ph = await apiRequest('GET', `/api/listings/alert/${activeAlertId}/listing/${listingId}/price-history`);
+        if (ph.history && ph.history.length > 1) {
+          const s = ph.summary;
+          const direction = s.change < 0 ? '▼' : s.change > 0 ? '▲' : '→';
+          const colour    = s.change < 0 ? '#48bb78' : s.change > 0 ? '#f56565' : '#a0aec0';
+          const points    = ph.history.map(r => `${Number(r.price).toFixed(0)}`).join(' → ');
+          const historyEl = document.createElement('div');
+          historyEl.style.cssText = 'margin:12px 0;padding:10px;background:rgba(255,255,255,0.04);border-radius:8px;font-size:13px';
+          historyEl.innerHTML = `
+            <div style="color:var(--muted);margin-bottom:6px">Price history (${s.dataPoints} data points)</div>
+            <div style="color:${colour};font-size:15px;font-weight:600;margin-bottom:4px">
+              ${direction} ${Math.abs(s.change).toFixed(0)} (${Math.abs(s.changePct)}%) since first seen
+            </div>
+            <div style="color:rgba(255,255,255,0.5);word-break:break-word">${points}</div>
+            <div style="display:flex;gap:16px;margin-top:6px;color:var(--muted)">
+              <span>Low: <strong style="color:var(--text)">${s.lowest}</strong></span>
+              <span>High: <strong style="color:var(--text)">${s.highest}</strong></span>
+              <span>Now: <strong style="color:var(--text)">${s.latest}</strong></span>
+            </div>`;
+          body.insertBefore(historyEl, body.querySelector('#modal-check-calendar').closest('div'));
+        }
+      } catch (e) { /* no history yet — silently skip */ }
+    }
 
     $('#modal-check-calendar').onclick = async () => {
       const btn = $('#modal-check-calendar');

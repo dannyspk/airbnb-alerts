@@ -66,6 +66,22 @@
           </div>
         </section>
 
+        <!-- ── Billing summary (for paying customers) ───────────────────────────── -->
+        <section class="card hidden" id="billing-summary-card">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+            <h2 style="margin:0">Your Plan</h2>
+            <div style="display:flex;gap:8px">
+              <button id="btn-manage-billing-dashboard" class="secondary" style="font-size:13px;padding:6px 10px">Manage Billing</button>
+              <a href="/billing" class="secondary" style="font-size:13px;padding:6px 10px;text-decoration:none;display:inline-block">View Details</a>
+            </div>
+          </div>
+          
+          <div id="billing-summary-content" style="display:flex;flex-direction:column;gap:12px">
+            <!-- Content will be populated by JavaScript -->
+            <div style="color:var(--muted)">Loading plan information…</div>
+          </div>
+        </section>
+
         <!-- ── Your alerts ──────────────────────────────────────────────── -->
         <section class="card hidden" id="alerts-card">
           <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">

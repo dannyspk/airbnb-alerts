@@ -19,6 +19,7 @@ import authRoutes from './routes/auth.js';
 import alertRoutes from './routes/alerts.js';
 import listingRoutes from './routes/listings.js';
 import billingRoutes, { stripeWebhookHandler } from './routes/billing.js';
+import adminRoutes from './routes/admin.js';
 
 dotenv.config();
 
@@ -107,6 +108,7 @@ app.use((req, res, next) => {
     '/auth': '/auth.html',
     '/settings': '/settings.html',
     '/billing': '/billing.html',
+    '/admin': '/admin.html',
   };
   
   // If the request path matches a clean URL, rewrite to .html
@@ -140,6 +142,7 @@ app.use('/api/auth', authRoutes);
 app.use('/api/alerts', alertRoutes);
 app.use('/api/listings', listingRoutes);
 app.use('/api/billing', billingRoutes);
+app.use('/api/admin', adminRoutes);
 
 // 404 handler
 app.use((req, res) => {

@@ -207,8 +207,23 @@ async function init() {
   // Handle return from Stripe Checkout
   const urlParams = new URLSearchParams(window.location.search);
   if (urlParams.get('checkout') === 'success') {
-    showMessage('Payment successful — your plan is now active!');
+    showMessage('Payment successful — refreshing your account…');
+    
+    // Refresh the user's tier in the JWT to ensure immediate access to new plan features
+    // without requiring a logout/login cycle.
+    try {
+      const res = await apiRequest('POST', '/api/billing/refresh-tier');
+      showMessage(`Plan upgraded to ${res.subscription_tier || 'premium'}! Your account is now active.`);
+    } catch (err) {
+      console.error('Failed to refresh tier:', err);
+      showMessage('Payment successful, but tier refresh had an issue. Please refresh the page.', true);
+    }
+    
+    // Clear the URL parameter
     history.replaceState({}, '', '/billing');
+    
+    // Reload subscription data after a brief delay to ensure DB is in sync
+    setTimeout(loadSubscription, 500);
   } else if (urlParams.get('checkout') === 'cancelled') {
     showMessage('Checkout cancelled — no charge was made.', true);
     history.replaceState({}, '', '/billing');

@@ -1,7 +1,8 @@
 import express from 'express';
+import jwt from 'jsonwebtoken';
 import Stripe from 'stripe';
 import { query } from '../db/index.js';
-import { authenticateToken } from '../middleware/auth.js';
+import { authenticateToken, cookieOpts, ACCESS_COOKIE, ACCESS_MAX_AGE } from '../middleware/auth.js';
 import logger from '../utils/logger.js';
 
 const router = express.Router();
@@ -147,6 +148,104 @@ router.get('/subscription', authenticateToken, async (req, res) => {
   } catch (err) {
     logger.error('GET /billing/subscription error:', err);
     res.status(500).json({ error: 'Failed to load subscription' });
+  }
+});
+
+// ─── POST /api/billing/refresh-tier ──────────────────────────────────────────
+// Refreshes the user's subscription tier from the database and returns updated JWT.
+// This is called after Stripe checkout to ensure the user's tier is immediately
+// updated without requiring a logout/login cycle.
+router.post('/refresh-tier', authenticateToken, async (req, res) => {
+  try {
+    const userRes = await query(
+      `SELECT id, email, subscription_tier FROM users WHERE id = $1`,
+      [req.user.userId]
+    );
+    if (!userRes.rows.length) return res.status(404).json({ error: 'User not found' });
+    const user = userRes.rows[0];
+
+    // Generate a new access token with the updated subscription_tier
+    const accessToken = jwt.sign(
+      {
+        userId: user.id,
+        email: user.email,
+        subscription_tier: user.subscription_tier
+      },
+      process.env.JWT_SECRET,
+      { expiresIn: '15m' }
+    );
+
+    // Set the new token in the cookie
+    res.cookie(ACCESS_COOKIE, accessToken, cookieOpts(ACCESS_MAX_AGE));
+
+    res.json({
+      subscription_tier: user.subscription_tier,
+      accessToken, // also return token for API clients
+    });
+  } catch (err) {
+    logger.error('POST /billing/refresh-tier error:', err);
+    res.status(500).json({ error: 'Failed to refresh subscription tier' });
+  }
+});
+
+// ─── GET /api/billing/summary ───────────────────────────────────────────────
+// Returns a formatted billing summary for the dashboard
+router.get('/summary', authenticateToken, async (req, res) => {
+  try {
+    const userRes = await query(
+      `SELECT id, email, subscription_tier FROM users WHERE id = $1`,
+      [req.user.userId]
+    );
+    if (!userRes.rows.length) return res.status(404).json({ error: 'User not found' });
+    const user = userRes.rows[0];
+
+    const subRes = await query(
+      `SELECT * FROM subscriptions WHERE user_id = $1`,
+      [user.id]
+    );
+    const sub = subRes.rows[0] || null;
+
+    // Get alert count for usage metrics
+    const alertsRes = await query(
+      `SELECT COUNT(*) as total FROM search_alerts WHERE user_id = $1 AND is_active = true`,
+      [user.id]
+    );
+    const alertCount = parseInt(alertsRes.rows[0]?.total || 0, 10);
+
+    // Build summary
+    const tier = user.subscription_tier;
+    const planConfig = PLANS[tier === 'free' ? 'free' : (tier === 'basic' ? 'basic_monthly' : 'premium_monthly')];
+    const alertsMax = planConfig?.alertsMax || 0;
+    const isPaid = tier !== 'free';
+
+    let billingInfo = null;
+    if (sub && isPaid) {
+      const periodEnd = sub.current_period_end
+        ? new Date(sub.current_period_end * 1000)
+        : null;
+      billingInfo = {
+        interval: sub.interval === 'year' ? 'yearly' : 'monthly',
+        amount: planConfig?.price || 0,
+        nextBillingDate: periodEnd ? periodEnd.toLocaleDateString() : null,
+        status: sub.status,
+        cancelAtPeriodEnd: sub.cancel_at_period_end || false,
+      };
+    }
+
+    res.json({
+      tier,
+      isPaid,
+      alerts: {
+        used: alertCount,
+        max: alertsMax,
+        remaining: alertsMax > 0 ? Math.max(0, alertsMax - alertCount) : null,
+      },
+      billing: billingInfo,
+      planName: planConfig?.name || 'Free',
+    });
+  } catch (err) {
+    logger.error('GET /billing/summary error:', err);
+    res.status(500).json({ error: 'Failed to load billing summary' });
   }
 });
 

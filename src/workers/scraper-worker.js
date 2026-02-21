@@ -114,11 +114,17 @@ export async function runSearchAlert(alertId, opts = {}) {
   // ── Load what we already know about this alert ──────────────────────────────
   // known_listing_ids = listings we've seen before for this alert
   // We also load last known price per listing so we can detect drops.
+  // Read last known price from price history (the only append-only source).
+  // Using listings.price would give us the already-overwritten current value;
+  // using search_results.old_price loses the original baseline on every upsert.
+  // DISTINCT ON picks the single most-recent row per listing for this alert.
   const knownResult = await query(
-    `SELECT sr.listing_id, l.price as last_price
-     FROM search_results sr
-     JOIN listings l ON l.listing_id = sr.listing_id
-     WHERE sr.search_alert_id = $1`,
+    `SELECT DISTINCT ON (lph.listing_id)
+            lph.listing_id,
+            lph.price AS last_price
+     FROM listing_price_history lph
+     WHERE lph.search_alert_id = $1
+     ORDER BY lph.listing_id, lph.recorded_at DESC`,
     [alertId]
   );
   const knownListings = new Map(knownResult.rows.map(r => [r.listing_id, Number(r.last_price)]));
@@ -165,6 +171,24 @@ export async function runSearchAlert(alertId, opts = {}) {
       ]
     );
 
+    // Append to price history only when price changes from last recorded value
+    if (price != null) {
+      await query(
+        `INSERT INTO listing_price_history (listing_id, search_alert_id, price)
+         SELECT $1, $2, $3
+         WHERE NOT EXISTS (
+           SELECT 1 FROM listing_price_history
+           WHERE listing_id = $1 AND search_alert_id = $2
+             AND price = $3
+             AND recorded_at = (
+               SELECT MAX(recorded_at) FROM listing_price_history
+               WHERE listing_id = $1 AND search_alert_id = $2
+             )
+         )`,
+        [id, alertId, price]
+      );
+    }
+
     const wasKnown   = knownListings.has(id);
     const lastPrice  = knownListings.get(id) ?? null;
 
@@ -195,8 +219,14 @@ export async function runSearchAlert(alertId, opts = {}) {
     } else {
       // ── EXISTING LISTING — check for price drop or freed-up ────────────
 
-      // Price drop: current price is lower than what we last stored
-      if (price != null && lastPrice != null && price < lastPrice) {
+      // Price drop: current price is meaningfully lower than what we last stored.
+      // Require a minimum absolute drop of $5 AND at least 3% to filter out
+      // rounding noise and trivial Airbnb display fluctuations.
+      const DROP_MIN_ABS = 5;   // dollars
+      const DROP_MIN_PCT = 0.03; // 3%
+      const drop = (price != null && lastPrice != null) ? lastPrice - price : 0;
+      if (price != null && lastPrice != null && price < lastPrice &&
+          drop >= DROP_MIN_ABS && drop / lastPrice >= DROP_MIN_PCT) {
         // Only alert if we haven't already notified at this price point
         const alreadyNotified = await query(
           `SELECT 1 FROM notifications
@@ -208,7 +238,14 @@ export async function runSearchAlert(alertId, opts = {}) {
         );
         if (alreadyNotified.rows.length === 0) {
           await upsertSearchResult(alertId, id, 'price_drop', lastPrice, price);
-          priceDropListings.push({ ...listing, price, url, oldPrice: lastPrice, newPrice: price });
+          // Fetch history to include in email
+          const histResult = await query(
+            `SELECT price, recorded_at FROM listing_price_history
+             WHERE listing_id = $1 AND search_alert_id = $2
+             ORDER BY recorded_at ASC`,
+            [id, alertId]
+          );
+          priceDropListings.push({ ...listing, price, url, oldPrice: lastPrice, newPrice: price, priceHistory: histResult.rows });
         }
       }
 

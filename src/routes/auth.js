@@ -6,7 +6,7 @@ import rateLimit from 'express-rate-limit';
 import { body, validationResult } from 'express-validator';
 import passport from 'passport';
 import { query } from '../db/index.js';
-import { authenticateToken } from '../middleware/auth.js';
+import { authenticateToken, cookieOpts, ACCESS_COOKIE, REFRESH_COOKIE, ACCESS_MAX_AGE, REFRESH_MAX_AGE } from '../middleware/auth.js';
 import { auditAction } from '../utils/auditLog.js';
 import logger from '../utils/logger.js';
 
@@ -156,24 +156,8 @@ router.post('/register', registerLimiter, registerValidationRules, handleValidat
       email: user.email
     }).catch(() => {}); // Silently fail audit logging
 
-    // Set tokens as HttpOnly cookies (matching middleware/auth.js expectations)
-    const isProduction = process.env.NODE_ENV === 'production';
-    const cookieOptions = {
-      httpOnly: true,
-      secure: isProduction,
-      sameSite: isProduction ? 'lax' : 'lax',
-      path: '/',
-    };
-
-    res.cookie('access_token', tokens.accessToken, {
-      ...cookieOptions,
-      maxAge: 15 * 60 * 1000, // 15 minutes
-    });
-
-    res.cookie('refresh_token', tokens.refreshToken, {
-      ...cookieOptions,
-      maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
-    });
+    res.cookie(ACCESS_COOKIE,  tokens.accessToken,  cookieOpts(ACCESS_MAX_AGE));
+    res.cookie(REFRESH_COOKIE, tokens.refreshToken, cookieOpts(REFRESH_MAX_AGE));
 
     res.status(201).json({
       message: 'User created successfully',
@@ -232,24 +216,8 @@ router.post('/login', loginLimiter, loginValidationRules, handleValidationErrors
       success: true
     }).catch(() => {});
 
-    // Set tokens as HttpOnly cookies (matching middleware/auth.js expectations)
-    const isProduction = process.env.NODE_ENV === 'production';
-    const cookieOptions = {
-      httpOnly: true,
-      secure: isProduction,
-      sameSite: isProduction ? 'lax' : 'lax',
-      path: '/',
-    };
-
-    res.cookie('access_token', tokens.accessToken, {
-      ...cookieOptions,
-      maxAge: 15 * 60 * 1000, // 15 minutes
-    });
-
-    res.cookie('refresh_token', tokens.refreshToken, {
-      ...cookieOptions,
-      maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
-    });
+    res.cookie(ACCESS_COOKIE,  tokens.accessToken,  cookieOpts(ACCESS_MAX_AGE));
+    res.cookie(REFRESH_COOKIE, tokens.refreshToken, cookieOpts(REFRESH_MAX_AGE));
 
     res.json({
       message: 'Login successful',
@@ -329,24 +297,8 @@ router.post('/refresh', refreshTokenValidation, handleValidationErrors, async (r
     // Generate new tokens
     const tokens = await generateTokens(user);
 
-    // Set tokens as HttpOnly cookies
-    const isProduction = process.env.NODE_ENV === 'production';
-    const cookieOptions = {
-      httpOnly: true,
-      secure: isProduction,
-      sameSite: isProduction ? 'lax' : 'lax',
-      path: '/',
-    };
-
-    res.cookie('access_token', tokens.accessToken, {
-      ...cookieOptions,
-      maxAge: 15 * 60 * 1000, // 15 minutes
-    });
-
-    res.cookie('refresh_token', tokens.refreshToken, {
-      ...cookieOptions,
-      maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
-    });
+    res.cookie(ACCESS_COOKIE,  tokens.accessToken,  cookieOpts(ACCESS_MAX_AGE));
+    res.cookie(REFRESH_COOKIE, tokens.refreshToken, cookieOpts(REFRESH_MAX_AGE));
 
     res.json({
       message: 'Token refreshed successfully',
@@ -732,23 +684,8 @@ router.get('/google/callback',
 
       // Set tokens as HttpOnly cookies instead of URL parameters.
       // URL parameters leak into server logs, browser history, and Referer headers.
-      const isProduction = process.env.NODE_ENV === 'production';
-      const cookieOptions = {
-        httpOnly: true,
-        secure: isProduction,
-        sameSite: isProduction ? 'lax' : 'lax',
-        path: '/',
-      };
-
-      res.cookie('access_token', accessToken, {
-        ...cookieOptions,
-        maxAge: 15 * 60 * 1000, // 15 minutes
-      });
-
-      res.cookie('refresh_token', refreshTokenSecret, {
-        ...cookieOptions,
-        maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
-      });
+      res.cookie(ACCESS_COOKIE,  accessToken,        cookieOpts(ACCESS_MAX_AGE));
+      res.cookie(REFRESH_COOKIE, refreshTokenSecret, cookieOpts(REFRESH_MAX_AGE));
 
       // Redirect cleanly — no tokens in the URL
       const redirectUrl = `${process.env.FRONTEND_URL || 'http://localhost:3000'}/`;

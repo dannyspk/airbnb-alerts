@@ -19,21 +19,35 @@ export async function sendNewListingEmail(userEmail, alert, listings, opts = {})
   const listingCount = listings.length;
   const location = alert.location || 'your search area';
   const type = opts.type || 'new'; // 'new' | 'price_drop' | 'availability'
-  
+
   const listingHTML = listings.slice(0, 5).map(listing => {
-    const pricePart = listing.oldPrice && listing.newPrice
-      ? `<p style="font-size: 16px; color: #008489; margin: 5px 0;"><strong>Was $${listing.oldPrice} → Now $${listing.newPrice}</strong></p>`
-      : (listing.price ? `<p style="font-size: 18px; color: #008489; margin: 5px 0;"><strong>$${listing.price}</strong></p>` : '');
+    // Price line — for drops show full history sparkline as text if available
+    let pricePart = '';
+    if (listing.oldPrice && listing.newPrice) {
+      const drop = listing.oldPrice - listing.newPrice;
+      const dropPct = ((drop / listing.oldPrice) * 100).toFixed(0);
+      pricePart = `
+        <p style="font-size:16px;color:#008489;margin:5px 0">
+          <strong>Was ${listing.oldPrice} → Now ${listing.newPrice}</strong>
+          <span style="font-size:13px;color:#e53e3e;margin-left:8px">▼ ${drop.toFixed(0)} (${dropPct}% off)</span>
+        </p>`;
+      // Inline price history if passed through
+      if (listing.priceHistory && listing.priceHistory.length > 1) {
+        const points = listing.priceHistory.map(r => `${Number(r.price).toFixed(0)}`).join(' → ');
+        pricePart += `<p style="font-size:12px;color:#888;margin:4px 0">History: ${points}</p>`;
+      }
+    } else if (listing.price) {
+      pricePart = `<p style="font-size:18px;color:#008489;margin:5px 0"><strong>${listing.price}</strong></p>`;
+    }
 
     return `
-      <div style="border: 1px solid #ddd; padding: 15px; margin: 10px 0; border-radius: 8px;">
-        <h3 style="margin: 0 0 10px 0;">${listing.name || 'Listing'}</h3>
+      <div style="border:1px solid #ddd;padding:15px;margin:10px 0;border-radius:8px">
+        <h3 style="margin:0 0 10px 0">${listing.name || 'Listing'}</h3>
         ${pricePart}
-        ${listing.rating ? `<p style="margin: 5px 0;">⭐ ${listing.rating} ${listing.reviewsCount ? `(${listing.reviewsCount} reviews)` : ''}</p>` : ''}
-        ${listing.address ? `<p style="margin: 5px 0; color: #666;">${listing.address}</p>` : ''}
-        <a href="${listing.url}" 
-           style="display: inline-block; padding: 10px 20px; background: #FF5A5F; color: white; 
-                  text-decoration: none; border-radius: 4px; margin-top: 10px;">
+        ${listing.rating ? `<p style="margin:5px 0">⭐ ${listing.rating} ${listing.reviewsCount ? `(${listing.reviewsCount} reviews)` : ''}</p>` : ''}
+        ${listing.address ? `<p style="margin:5px 0;color:#666">${listing.address}</p>` : ''}
+        <a href="${listing.url}"
+           style="display:inline-block;padding:10px 20px;background:#FF5A5F;color:white;text-decoration:none;border-radius:4px;margin-top:10px">
           View on Airbnb
         </a>
       </div>
